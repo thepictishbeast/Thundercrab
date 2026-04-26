@@ -1,0 +1,73 @@
+# Thundercrab
+
+A privacy-first, Rust-native mail client for the PlausiDen mail stack.
+Aims to track Thunderbird's standards/protocol coverage without inheriting
+its architecture.
+
+> Status: scaffold. Workspace compiles, schemas + safety + federated
+> ledger primitives are tested. IMAP/SMTP/ManageSieve backends are
+> stubs (`thundercrab-imap`); GUI not started.
+
+## What makes this different
+
+Most mail clients have static "Promotions/Social/etc." rules that don't
+improve over time. Thundercrab has a **federated rule learning** loop:
+
+1. Every time you flag or move a message, the client logs a typed
+   *flag event* — features only (sender domain, header presence,
+   subject tokens), never bodies, never full addresses.
+2. When patterns become consistent (e.g., "9 of 10 messages from
+   `@mailchimp.com` go to Promotions"), the client **derives a rule**
+   and starts applying it locally.
+3. Optionally, signed copies of derived rules are submitted to a
+   public corroboration ledger. Rules that N independent installs
+   propose become *suggestions* surfaced in the UI for one-click
+   acceptance.
+
+Privacy invariants enforced in code (see `thundercrab-suggestions/src/safety.rs`):
+
+- Federated rules can only **sort out of INBOX**. They cannot promote
+  messages into INBOX or set `\Flagged` / `$Important`.
+- The match AST has no body / full-address variants — the type system
+  prevents content from ever entering a rule.
+- Signing keys are per-install (Ed25519). Rotate by deleting the keypair.
+- `submitted_at_day` is days-since-epoch, not minute-precision — defends
+  against timing-based traffic analysis.
+
+## Layout
+
+```
+Cargo.toml                            # workspace
+thundercrab-core/                     # rule schema, flag events, SQLite store
+  ├─ src/crab_rule.rs                 # CrabRule (wire-compat with mail-config)
+  ├─ src/flag_event.rs                # FlagEvent record
+  └─ src/db.rs                        # local SQLite layer
+thundercrab-imap/                     # IMAP/SMTP/ManageSieve client (scaffold)
+  └─ src/lib.rs                       # AccountConfig, Backend trait
+thundercrab-suggestions/              # federated rule learning
+  ├─ src/derive.rs                    # candidate-rule derivation
+  ├─ src/safety.rs                    # apply_suggestion guards
+  └─ src/ledger.rs                    # signed-suggestion wire format
+docs/
+  ├─ ARCHITECTURE.md
+  ├─ THUNDERBIRD_PARITY.md
+  └─ SUGGESTION_HEURISTICS.md
+```
+
+## Wire compatibility with mail-config
+
+`thundercrab_core::CrabRule` is byte-stable with
+`mail_config::CategoryRule` from `Secure-Email-Server-and-UI` modulo a
+single field: `origin`. The orchestrator emits Sieve from
+`CategoryRule`; Thundercrab edits the same logical rule via ManageSieve.
+The `tests/schema_compat` integration test asserts the JSON shapes match.
+
+## Build & test
+
+```sh
+cargo test --workspace
+```
+
+## License
+
+AGPL-3.0-or-later.

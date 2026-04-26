@@ -1,0 +1,8 @@
+target/
+Cargo.lock
+*.svbin
+.DS_Store
+*.swp
+
+# never commit a real signing key
+*.thundercrab-key

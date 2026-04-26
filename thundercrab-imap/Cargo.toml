@@ -1,0 +1,17 @@
+[package]
+name = "thundercrab-imap"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Thundercrab IMAP/SMTP/ManageSieve client layer (scaffold)."
+
+[dependencies]
+thundercrab-core = { path = "../thundercrab-core" }
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

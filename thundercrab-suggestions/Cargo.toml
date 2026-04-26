@@ -1,0 +1,23 @@
+[package]
+name = "thundercrab-suggestions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Thundercrab federated rule learning — derive, sign, dedupe, and safely apply community rule suggestions."
+
+[dependencies]
+thundercrab-core = { path = "../thundercrab-core" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+ed25519-dalek.workspace = true
+rand_core.workspace = true
+blake3.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
