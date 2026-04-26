@@ -1,0 +1,34 @@
+[package]
+name = "crab-ledger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Federated suggestion ledger for Thundercrab — accepts Ed25519-signed rule submissions, counts corroborators, never sees content."
+
+[[bin]]
+name = "crab-ledger"
+path = "src/main.rs"
+
+[dependencies]
+thundercrab-core = { path = "../thundercrab-core" }
+thundercrab-suggestions = { path = "../thundercrab-suggestions" }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

@@ -4,6 +4,7 @@ members = [
     "thundercrab-core",
     "thundercrab-imap",
     "thundercrab-suggestions",
+    "crab-ledger",
 ]
 
 [workspace.package]
@@ -39,6 +40,13 @@ anyhow = "1"
 
 # Logging
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP service (used by crab-ledger only)
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tower-log"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["limit", "set-header", "trace"] }
+http = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
