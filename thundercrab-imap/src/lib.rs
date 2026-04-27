@@ -14,6 +14,7 @@
 
 #![doc(html_no_source)]
 
+pub mod managesieve;
 pub mod rust_imap;
 
 use std::future::Future;

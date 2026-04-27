@@ -316,11 +316,17 @@ impl Backend for RustImapBackend {
     }
 
     async fn put_sieve(&self, _script: &str) -> Result<(), BackendError> {
-        // ManageSieve runs on a separate port (4190) and is a
-        // separate state machine from IMAP. The implementation lives
-        // in a sibling module (tracked: thundercrab #61).
+        // ManageSieve is a separate protocol on a separate port (4190)
+        // with its own STARTTLS upgrade and SASL flow — it cannot be
+        // multiplexed onto the IMAP session. The implementation lives
+        // in `crate::managesieve::put_active_script`, which is a
+        // standalone function that takes credentials per-call. We
+        // could in principle have RustImapBackend retain credentials
+        // and call through here, but caching the password on the
+        // struct after login was specifically rejected on the IMAP
+        // side; we keep it consistent.
         Err(BackendError::NotImplemented(
-            "put_sieve: implement via ManageSieve client (#61)",
+            "put_sieve: call thundercrab_imap::managesieve::put_active_script directly",
         ))
     }
 }
