@@ -27,6 +27,10 @@ rustls-pki-types = "1"
 webpki-roots = "1"
 futures = "0.3"
 
+# Outbound mail (RFC 5321) over STARTTLS or implicit TLS.
+# default-features=false drops the unused builders we don't need.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

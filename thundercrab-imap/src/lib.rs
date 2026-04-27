@@ -16,6 +16,7 @@
 
 pub mod managesieve;
 pub mod rust_imap;
+pub mod smtp;
 
 use std::future::Future;
 use thiserror::Error;

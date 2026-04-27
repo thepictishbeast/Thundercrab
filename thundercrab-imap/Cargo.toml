@@ -18,6 +18,7 @@ rustls.workspace = true
 rustls-pki-types.workspace = true
 webpki-roots.workspace = true
 futures.workspace = true
+lettre.workspace = true
 
 [dev-dependencies]
 # Used by the list_inbox example for tracing setup.
