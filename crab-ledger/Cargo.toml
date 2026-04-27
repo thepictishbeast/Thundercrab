@@ -26,6 +26,12 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# Per-pubkey rate limiting for /v1/submit. Same crate the
+# plausiden-site contact form uses; the keyed limiter wraps a
+# token-bucket per public key.
+governor = "0.8"
+# PoW gate uses blake3 over (pattern_hash || pubkey || nonce).
+blake3 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

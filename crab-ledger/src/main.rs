@@ -36,9 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = std::env::var("CRAB_LEDGER_DB").unwrap_or_else(|_| DEFAULT_DB.into());
 
     let store = Store::open(&db)?;
-    let state = Arc::new(AppState {
-        store: tokio::sync::Mutex::new(store),
-    });
+    let state = Arc::new(AppState::new(store));
 
     let app = router(state);
 

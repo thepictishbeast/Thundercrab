@@ -22,8 +22,12 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use governor::clock::DefaultClock;
+use governor::state::{InMemoryState, NotKeyed, keyed::DashMapStateStore};
+use governor::{Quota, RateLimiter};
 use http::header::{HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use thundercrab_suggestions::{SignedSuggestion, ledger::verify};
 use tower_http::limit::RequestBodyLimitLayer;
@@ -36,12 +40,64 @@ use crate::store::{CorroborationRow, Store};
 /// payloads are well under 1 KiB; this is defense against amplification.
 const MAX_BODY_BYTES: usize = 16 * 1024;
 
+/// Per-pubkey submission ceiling. A well-behaved client submits a
+/// single suggestion per (pattern, day) — at most a few dozen
+/// patterns/day. This is one OOM above expected volume; sustained
+/// breaches surface as a Sybil attempt.
+const PER_PUBKEY_PER_HOUR: u32 = 60;
+
+/// Global submission ceiling — defense in depth on top of the
+/// per-pubkey limit, sized so a single attacker can't burn the
+/// whole node by churning fresh keypairs.
+const GLOBAL_PER_HOUR: u32 = 600;
+
+/// PoW difficulty: required leading zero bits in
+/// `blake3(pattern_hash || pubkey || pow_nonce)`. Each bit doubles
+/// the expected work; 16 bits ≈ 64K hashes, ≈ a fraction of a second
+/// on commodity hardware. Tuned to be near-free for honest clients,
+/// expensive for Sybil farms generating thousands of fresh keypairs.
+const POW_DIFFICULTY_BITS: u32 = 16;
+
+/// Per-pubkey rate limiter: keyed by ed25519 public key bytes.
+type PerKeyLimiter = RateLimiter<[u8; 32], DashMapStateStore<[u8; 32]>, DefaultClock>;
+/// Global limiter: a single bucket all submitters share.
+type GlobalLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
+
 /// Shared service state. Wrapped in `Arc` for the Axum extractor.
 pub struct AppState {
     /// SQLite-backed corroboration store. Wrapped in a `Mutex` to
     /// serialize writes — SQLite's WAL mode allows concurrent readers
     /// but a single writer per connection.
     pub store: tokio::sync::Mutex<Store>,
+    /// Per-pubkey rate limiter. A keyed `RateLimiter` from `governor`
+    /// keeps a token bucket per ed25519 pubkey; entries age out
+    /// automatically.
+    pub per_key: PerKeyLimiter,
+    /// Global rate limiter. Single shared bucket across all submitters.
+    pub global: GlobalLimiter,
+}
+
+impl AppState {
+    /// Build a state with default rate-limit ceilings.
+    ///
+    /// # Panics
+    /// Never — `NonZeroU32::new(PER_PUBKEY_PER_HOUR)` and
+    /// `NonZeroU32::new(GLOBAL_PER_HOUR)` are non-zero by inspection;
+    /// the const definitions above guard.
+    #[must_use]
+    pub fn new(store: Store) -> Self {
+        let per_key_quota = Quota::per_hour(
+            NonZeroU32::new(PER_PUBKEY_PER_HOUR).expect("PER_PUBKEY_PER_HOUR > 0"),
+        );
+        let global_quota = Quota::per_hour(
+            NonZeroU32::new(GLOBAL_PER_HOUR).expect("GLOBAL_PER_HOUR > 0"),
+        );
+        Self {
+            store: tokio::sync::Mutex::new(store),
+            per_key: RateLimiter::dashmap(per_key_quota),
+            global: RateLimiter::direct(global_quota),
+        }
+    }
 }
 
 /// Build the router. Caller wires it up in `main`.
@@ -77,10 +133,101 @@ struct ErrorResponse {
     error: &'static str,
 }
 
+/// Wire envelope for /v1/submit. Wraps the canonical
+/// `SignedSuggestion` with a PoW nonce; the nonce is mixed into a
+/// blake3 hash of (pattern_hash || pubkey) and the result must
+/// have at least `POW_DIFFICULTY_BITS` leading zero bits. The
+/// submitter mines the nonce locally; the ledger verifies in O(1).
+#[derive(Debug, Deserialize)]
+struct SubmitEnvelope {
+    /// The signed suggestion body.
+    signed: SignedSuggestion,
+    /// Proof-of-work nonce. The submitter increments until the
+    /// blake3 hash of (pattern_hash || pubkey || nonce_le_bytes)
+    /// has the required leading zero bits.
+    pow_nonce: u64,
+}
+
+/// Count leading zero bits in a 32-byte digest.
+fn leading_zero_bits(bytes: &[u8; 32]) -> u32 {
+    let mut total = 0u32;
+    for b in bytes {
+        if *b == 0 {
+            total += 8;
+        } else {
+            total += b.leading_zeros();
+            break;
+        }
+    }
+    total
+}
+
+/// Verify that `(pattern_hash || pubkey || nonce_le_bytes)` hashes
+/// to a digest with the required leading zero bits.
+fn verify_pow(
+    pattern_hash: &[u8; 32],
+    public_key: &[u8; 32],
+    pow_nonce: u64,
+    difficulty_bits: u32,
+) -> bool {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(pattern_hash);
+    hasher.update(public_key);
+    hasher.update(&pow_nonce.to_le_bytes());
+    let digest = hasher.finalize();
+    let arr: [u8; 32] = *digest.as_bytes();
+    leading_zero_bits(&arr) >= difficulty_bits
+}
+
 async fn handle_submit(
     State(state): State<Arc<AppState>>,
-    Json(signed): Json<SignedSuggestion>,
+    Json(envelope): Json<SubmitEnvelope>,
 ) -> impl IntoResponse {
+    let signed = envelope.signed;
+
+    // Global ceiling first — cheapest to check, hardest to fool.
+    if state.global.check().is_err() {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResponse {
+                error: "global_rate_limit",
+            }),
+        )
+            .into_response();
+    }
+
+    // Per-pubkey ceiling — keyed limiter ages out idle keys.
+    if state.per_key.check_key(&signed.public_key).is_err() {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResponse {
+                error: "per_pubkey_rate_limit",
+            }),
+        )
+            .into_response();
+    }
+
+    // PoW gate — refuses requests that haven't paid the work cost.
+    // The pattern_hash lives inside `signed.suggestion.pattern_hash`,
+    // but we don't trust the submitter's claim until verify() runs.
+    // Pre-verify, we have to trust the bytes; if they later fail
+    // verify(), a tiny amount of compute is wasted on the PoW check.
+    // That's acceptable — PoW is much cheaper than a deep verify.
+    if !verify_pow(
+        &signed.suggestion.pattern_hash,
+        &signed.public_key,
+        envelope.pow_nonce,
+        POW_DIFFICULTY_BITS,
+    ) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "pow_insufficient",
+            }),
+        )
+            .into_response();
+    }
+
     let suggestion = match verify(&signed) {
         Ok(s) => s,
         Err(e) => {
@@ -276,10 +423,26 @@ mod tests {
 
     fn build_app() -> Router {
         let store = Store::open_in_memory().unwrap();
-        let state = Arc::new(AppState {
-            store: tokio::sync::Mutex::new(store),
-        });
+        let state = Arc::new(AppState::new(store));
         router(state)
+    }
+
+    /// Brute-force mine a PoW nonce for a `SignedSuggestion`. With
+    /// the configured 16-bit difficulty, expected work is ~32K
+    /// hashes — fast for tests.
+    fn mine_envelope(signed: SignedSuggestion) -> Vec<u8> {
+        let pattern_hash = signed.suggestion.pattern_hash;
+        let public_key = signed.public_key;
+        for nonce in 0u64..u64::MAX {
+            if verify_pow(&pattern_hash, &public_key, nonce, POW_DIFFICULTY_BITS) {
+                let env = serde_json::json!({
+                    "signed": signed,
+                    "pow_nonce": nonce,
+                });
+                return serde_json::to_vec(&env).unwrap();
+            }
+        }
+        panic!("could not mine PoW nonce within u64 range");
     }
 
     #[tokio::test]
@@ -306,7 +469,7 @@ mod tests {
         let app = build_app();
         let key = InstallKey::generate();
         let signed = key.sign(Suggestion::new(fixture_rule("Promotions")));
-        let body = serde_json::to_vec(&signed).unwrap();
+        let body = mine_envelope(signed);
 
         let resp = app
             .clone()
@@ -349,7 +512,7 @@ mod tests {
         let app = build_app();
         let key = InstallKey::generate();
         let signed = key.sign(Suggestion::new(fixture_rule("Updates")));
-        let body = serde_json::to_vec(&signed).unwrap();
+        let body = mine_envelope(signed);
 
         for _ in 0..3 {
             let resp = app
@@ -390,7 +553,7 @@ mod tests {
         for _ in 0..3 {
             let k = InstallKey::generate();
             let s = k.sign(Suggestion::new(rule.clone()));
-            let body = serde_json::to_vec(&s).unwrap();
+            let body = mine_envelope(s);
             let resp = app
                 .clone()
                 .oneshot(
@@ -426,7 +589,7 @@ mod tests {
         let mut signed = key.sign(Suggestion::new(fixture_rule("Promotions")));
         // Flip a bit in the signature — must fail verify().
         signed.signature[0] ^= 0xff;
-        let body = serde_json::to_vec(&signed).unwrap();
+        let body = mine_envelope(signed);
         let resp = app
             .oneshot(
                 Request::builder()
