@@ -4,6 +4,18 @@ members = [
     "thundercrab-core",
     "thundercrab-imap",
     "thundercrab-cli",
+    "thundercrab-gui",
+    "thundercrab-suggestions",
+    "crab-ledger",
+]
+# `cargo build` from the workspace root excludes the GUI by default
+# because it has system-display dependencies (winit) that don't
+# resolve on headless servers. Build the GUI explicitly with
+# `cargo build -p thundercrab-gui` from a desktop dev machine.
+default-members = [
+    "thundercrab-core",
+    "thundercrab-imap",
+    "thundercrab-cli",
     "thundercrab-suggestions",
     "crab-ledger",
 ]

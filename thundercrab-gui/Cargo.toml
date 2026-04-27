@@ -1,0 +1,26 @@
+[package]
+name = "thundercrab-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Thundercrab desktop GUI — Iced-backed first window. Composes the IMAP/ManageSieve/SMTP wire layer behind a typed Elm-architecture app."
+
+[[bin]]
+name = "thundercrab"
+path = "src/main.rs"
+
+[dependencies]
+thundercrab-imap = { path = "../thundercrab-imap" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Iced is the supersociety pick: pure Rust (no GTK system runtime,
+# no WebView), single binary per platform (Linux/macOS/Windows),
+# Elm architecture so every state transition is compile-time
+# typed. We pay in compile time + binary size; both bounded.
+iced = { version = "0.14", default-features = false, features = ["tokio", "advanced"] }
+
+[lints]
+workspace = true
