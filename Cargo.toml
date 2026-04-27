@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "thundercrab-core",
     "thundercrab-imap",
+    "thundercrab-cli",
     "thundercrab-suggestions",
     "crab-ledger",
 ]
