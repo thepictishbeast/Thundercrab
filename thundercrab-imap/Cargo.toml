@@ -5,13 +5,27 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Thundercrab IMAP/SMTP/ManageSieve client layer (scaffold)."
+description = "Thundercrab IMAP/SMTP/ManageSieve client layer."
 
 [dependencies]
 thundercrab-core = { path = "../thundercrab-core" }
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+async-imap.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+webpki-roots.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+# Used by the list_inbox example for tracing setup.
+tracing-subscriber = { workspace = true }
+
+[[example]]
+name = "list_inbox"
+path = "examples/list_inbox.rs"
 
 [lints]
 workspace = true

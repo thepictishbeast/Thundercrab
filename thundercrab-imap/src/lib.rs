@@ -1,18 +1,20 @@
-//! `thundercrab-imap` — IMAP4rev2 / SMTP / ManageSieve client layer.
+//! `thundercrab-imap` — `IMAP4rev2` / SMTP / `ManageSieve` client layer.
 //!
-//! **Status: scaffold.** This crate currently exposes only the typed
-//! account/session shape and the `Backend` trait. Concrete IMAP and
-//! SMTP backends land in follow-up work — see
-//! `docs/THUNDERBIRD_PARITY.md` for the protocol-coverage roadmap.
+//! Provides the typed [`AccountConfig`], [`Backend`] trait, and a
+//! concrete IMAPS backend ([`rust_imap::RustImapBackend`]) using
+//! `async-imap` over `tokio-rustls`. SMTP and `ManageSieve` sit on
+//! the same trait surface — separate-port protocols implemented in
+//! sibling modules; tracked as thundercrab #60 / #61.
 //!
-//! The reason this crate exists already, even empty: it forces the
-//! workspace boundary. UI / GUI code in future crates depends on
-//! `Backend`, not on a concrete IMAP implementation. Swapping in a
-//! `MockBackend` for tests, a `JmapBackend` for JMAP servers, or a
-//! `LocalMaildirBackend` for offline-only mode is then a matter of
-//! satisfying the trait — not editing UI code.
+//! Why a trait at all: GUI / suggestion code depends on `Backend`,
+//! not on the concrete IMAP wire. Swapping in a `MockBackend` for
+//! tests, a `JmapBackend` for JMAP servers, or a `LocalMaildirBackend`
+//! for offline-only mode is then a matter of satisfying the trait
+//! — not editing UI code.
 
 #![doc(html_no_source)]
+
+pub mod rust_imap;
 
 use std::future::Future;
 use thiserror::Error;
@@ -37,7 +39,7 @@ pub enum BackendError {
 /// Server connection parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountConfig {
-    /// Hostname for IMAP and ManageSieve (assumed colocated; SMTP may
+    /// Hostname for IMAP and `ManageSieve` (assumed colocated; SMTP may
     /// differ, see `smtp_host`).
     pub imap_host: String,
     /// IMAPS port (default 993).
@@ -46,7 +48,7 @@ pub struct AccountConfig {
     pub smtp_host: String,
     /// SMTP submission port (default 587 STARTTLS, 465 implicit TLS).
     pub smtp_port: u16,
-    /// ManageSieve port (default 4190).
+    /// `ManageSieve` port (default 4190).
     pub sieve_port: u16,
     /// Username (full email address).
     pub username: String,
@@ -135,7 +137,7 @@ pub trait Backend: Send + Sync {
         set: bool,
     ) -> impl Future<Output = Result<(), BackendError>> + Send;
 
-    /// Push the active server-side Sieve script via ManageSieve.
+    /// Push the active server-side Sieve script via `ManageSieve`.
     /// Empty `script` is a valid "clear it" call.
     fn put_sieve(
         &self,
