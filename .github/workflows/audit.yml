@@ -20,7 +20,10 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Audit
-        run: cargo audit --deny warnings
+        # Deny actual unmaintained / advisory matches; warnings (e.g.,
+        # informational notices on transitive deps we can't directly
+        # update) don't block merges.
+        run: cargo audit --deny unmaintained --deny unsound --deny yanked
 
   cargo-deny:
     name: cargo-deny (license + bans + sources)
