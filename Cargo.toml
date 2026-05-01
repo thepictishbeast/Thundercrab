@@ -6,17 +6,22 @@ members = [
     "thundercrab-cli",
     "thundercrab-gui",
     "thundercrab-suggestions",
+    "thundercrab-theme",
     "crab-ledger",
 ]
 # `cargo build` from the workspace root excludes the GUI by default
 # because it has system-display dependencies (winit) that don't
 # resolve on headless servers. Build the GUI explicitly with
 # `cargo build -p thundercrab-gui` from a desktop dev machine.
+# `thundercrab-theme` is a pure-data Loom→Iced bridge with no
+# display deps, so it stays in default-members and is exercised
+# by the standard `cargo build` / `cargo test` runs.
 default-members = [
     "thundercrab-core",
     "thundercrab-imap",
     "thundercrab-cli",
     "thundercrab-suggestions",
+    "thundercrab-theme",
     "crab-ledger",
 ]
 

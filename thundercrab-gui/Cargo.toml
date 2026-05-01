@@ -13,6 +13,14 @@ path = "src/main.rs"
 
 [dependencies]
 thundercrab-imap = { path = "../thundercrab-imap" }
+# Loom→Iced bridge — every magic number / color in this GUI must
+# come through here, not as a literal. See thundercrab-theme docs
+# for the doctrine and tests/spacing_is_monotonic-style guards.
+thundercrab-theme = { path = "../thundercrab-theme" }
+# Re-exported via thundercrab-theme so view code can name tokens
+# directly (FontSize::H1 etc.); pinned to the same Loom rev as
+# the bridge crate to keep them in lockstep.
+loom-tokens = { git = "https://github.com/thepictishbeast/PlausiDen-Loom.git", rev = "c285e2e" }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

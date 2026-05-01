@@ -1,0 +1,23 @@
+[package]
+name = "thundercrab-theme"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Loom→Iced bridge: typed PlausiDen design tokens (color, spacing, font-size, radius) projected onto Iced primitives. The single source of truth is loom-tokens; this crate is a pure-function generator, no parallel constants."
+
+[dependencies]
+# Pinned to a Loom commit so a token change in Loom is a deliberate
+# rev-bump here, not a silent floating dependency. Bump in lockstep
+# with the matching loom-components release on the web side.
+loom-tokens = { git = "https://github.com/thepictishbeast/PlausiDen-Loom.git", rev = "c285e2e" }
+# Only the core types (Color, Pixels) — no widget/renderer/winit.
+# `default-features = false` and no extra features keeps this crate
+# headless-buildable so CI on web-01 (and any test runner without
+# a display) can verify the projection without spinning up winit.
+# The GUI crate adds the heavy iced features on top of this base.
+iced_core = { version = "0.14", default-features = false }
+
+[lints]
+workspace = true

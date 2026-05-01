@@ -49,9 +49,11 @@ use iced::widget::{
     Column, button, column, container, row, scrollable, text, text_input,
 };
 use iced::{Element, Length, Task, Theme};
+use loom_tokens::{FontSize, Spacing};
 use thundercrab_imap::{
     AccountConfig, Backend, FolderSummary, rust_imap::RustImapBackend,
 };
+use thundercrab_theme::{font_size, spacing};
 
 /// Entry point.
 ///
@@ -141,11 +143,17 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // PILOT: header sizes wired through Loom tokens. The rest of
+        // this view still uses literals; converting them is a
+        // follow-up, gated on `loom-lint` learning to read Iced view
+        // files. Keep this comment until the lint catches the rest
+        // automatically.
         let header = column![
-            text("Thundercrab").size(32),
-            text("Local-first mail client. Rules transparent. No cloud.").size(14),
+            text("Thundercrab").size(font_size(FontSize::H1)),
+            text("Local-first mail client. Rules transparent. No cloud.")
+                .size(font_size(FontSize::Sm)),
         ]
-        .spacing(4);
+        .spacing(spacing(Spacing::S1));
 
         let form = column![
             row![
