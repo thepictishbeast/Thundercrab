@@ -77,10 +77,7 @@ impl RustImapBackend {
     /// - `Transport` if TCP connect, TLS handshake, or initial
     ///   server greeting fails.
     /// - `Auth` if `LOGIN` is rejected.
-    pub async fn connect(
-        config: &AccountConfig,
-        password: &str,
-    ) -> Result<Self, BackendError> {
+    pub async fn connect(config: &AccountConfig, password: &str) -> Result<Self, BackendError> {
         let host = config.imap_host.as_str();
         let port = config.imap_port;
         let tcp = TcpStream::connect((host, port))
@@ -135,8 +132,7 @@ impl Backend for RustImapBackend {
                 .map_err(|e| BackendError::Protocol(format!("list: {e}")))?;
             let mut acc = Vec::new();
             while let Some(item) = stream.next().await {
-                let name = item
-                    .map_err(|e| BackendError::Protocol(format!("list item: {e}")))?;
+                let name = item.map_err(|e| BackendError::Protocol(format!("list item: {e}")))?;
                 // .name() and .attributes() borrow from `name`; we
                 // need owned values to release the borrow before the
                 // stream ends and `name` goes out of scope.

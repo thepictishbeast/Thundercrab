@@ -97,13 +97,11 @@ pub async fn send_message(
                 .credentials(creds)
                 .build()
         }
-        SmtpEncryption::ImplicitTls => {
-            AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
-                .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?
-                .port(cfg.smtp_port)
-                .credentials(creds)
-                .build()
-        }
+        SmtpEncryption::ImplicitTls => AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
+            .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?
+            .port(cfg.smtp_port)
+            .credentials(creds)
+            .build(),
     };
 
     transport
@@ -130,8 +128,7 @@ mod tests {
 
     #[test]
     fn parse_mailbox_accepts_display_form() {
-        let m = parse_mailbox("Display Name <user@example.com>")
-            .expect("display-form parses");
+        let m = parse_mailbox("Display Name <user@example.com>").expect("display-form parses");
         assert_eq!(m.email.to_string(), "user@example.com");
         assert_eq!(m.name.as_deref(), Some("Display Name"));
     }

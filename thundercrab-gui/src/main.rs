@@ -45,14 +45,10 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::too_many_lines)]
 
-use iced::widget::{
-    Column, button, column, container, row, scrollable, text, text_input,
-};
+use iced::widget::{Column, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length, Task, Theme};
 use loom_tokens::{FontSize, Spacing};
-use thundercrab_imap::{
-    AccountConfig, Backend, FolderSummary, rust_imap::RustImapBackend,
-};
+use thundercrab_imap::{AccountConfig, Backend, FolderSummary, rust_imap::RustImapBackend};
 use thundercrab_theme::{font_size, spacing};
 
 /// Entry point.
@@ -62,8 +58,7 @@ use thundercrab_theme::{font_size, spacing};
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with_target(false)
         .compact()
@@ -179,12 +174,16 @@ impl App {
             ]
             .spacing(8),
             row![
-                button(text(if self.connecting { "Connecting…" } else { "Connect" }))
-                    .on_press_maybe(if self.connecting {
-                        None
-                    } else {
-                        Some(Message::Connect)
-                    }),
+                button(text(if self.connecting {
+                    "Connecting…"
+                } else {
+                    "Connect"
+                }))
+                .on_press_maybe(if self.connecting {
+                    None
+                } else {
+                    Some(Message::Connect)
+                }),
                 text(&self.status).size(13),
             ]
             .spacing(12),

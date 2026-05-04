@@ -110,9 +110,8 @@ pub struct MessageHeaders {
 /// multiple connections.
 pub trait Backend: Send + Sync {
     /// List all folders the user can see.
-    fn list_folders(
-        &self,
-    ) -> impl Future<Output = Result<Vec<FolderSummary>, BackendError>> + Send;
+    fn list_folders(&self)
+    -> impl Future<Output = Result<Vec<FolderSummary>, BackendError>> + Send;
 
     /// Fetch headers for messages in a folder, optionally limited.
     /// `limit = None` means "everything".
@@ -141,10 +140,7 @@ pub trait Backend: Send + Sync {
 
     /// Push the active server-side Sieve script via `ManageSieve`.
     /// Empty `script` is a valid "clear it" call.
-    fn put_sieve(
-        &self,
-        script: &str,
-    ) -> impl Future<Output = Result<(), BackendError>> + Send;
+    fn put_sieve(&self, script: &str) -> impl Future<Output = Result<(), BackendError>> + Send;
 }
 
 #[cfg(test)]

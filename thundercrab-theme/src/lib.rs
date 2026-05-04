@@ -150,9 +150,11 @@ fn parse_hex(hex: &str) -> Color {
         u8::from_str_radix(pair, 16).ok()
     };
     match (h(0), h(2), h(4)) {
-        (Some(r), Some(g), Some(b)) => {
-            Color::from_rgb(f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0)
-        }
+        (Some(r), Some(g), Some(b)) => Color::from_rgb(
+            f32::from(r) / 255.0,
+            f32::from(g) / 255.0,
+            f32::from(b) / 255.0,
+        ),
         _ => Color::BLACK,
     }
 }
@@ -207,11 +209,29 @@ mod tests {
     fn every_light_role_parses_to_a_finite_color() {
         for r in ColorRole::all() {
             let c = color_light(r.role);
-            assert!(c.r.is_finite() && c.g.is_finite() && c.b.is_finite(),
-                "role {} produced non-finite RGB", r.role);
-            assert!((0.0..=1.0).contains(&c.r), "role {} red out of range: {}", r.role, c.r);
-            assert!((0.0..=1.0).contains(&c.g), "role {} green out of range: {}", r.role, c.g);
-            assert!((0.0..=1.0).contains(&c.b), "role {} blue out of range: {}", r.role, c.b);
+            assert!(
+                c.r.is_finite() && c.g.is_finite() && c.b.is_finite(),
+                "role {} produced non-finite RGB",
+                r.role
+            );
+            assert!(
+                (0.0..=1.0).contains(&c.r),
+                "role {} red out of range: {}",
+                r.role,
+                c.r
+            );
+            assert!(
+                (0.0..=1.0).contains(&c.g),
+                "role {} green out of range: {}",
+                r.role,
+                c.g
+            );
+            assert!(
+                (0.0..=1.0).contains(&c.b),
+                "role {} blue out of range: {}",
+                r.role,
+                c.b
+            );
         }
     }
 
@@ -231,7 +251,12 @@ mod tests {
         // Sanity: Loom's "primary" light role is hsl(220 90% 28%) —
         // a deep blue. The blue channel should dominate red.
         let c = color_light("primary");
-        assert!(c.b > c.r, "primary should be blue-dominant; got r={} b={}", c.r, c.b);
+        assert!(
+            c.b > c.r,
+            "primary should be blue-dominant; got r={} b={}",
+            c.r,
+            c.b
+        );
     }
 
     #[test]
@@ -266,8 +291,12 @@ mod tests {
     fn spacing_is_monotonic() {
         let steps = Spacing::all();
         for pair in steps.windows(2) {
-            assert!(spacing(pair[1]) >= spacing(pair[0]),
-                "spacing regressed at {:?} → {:?}", pair[0], pair[1]);
+            assert!(
+                spacing(pair[1]) >= spacing(pair[0]),
+                "spacing regressed at {:?} → {:?}",
+                pair[0],
+                pair[1]
+            );
         }
     }
 

@@ -151,8 +151,10 @@ pub fn verify(signed: &SignedSuggestion) -> Result<&Suggestion, LedgerError> {
     let pk = VerifyingKey::from_bytes(&signed.public_key).map_err(|_| LedgerError::BadKey)?;
     let body = canonical_json_bytes(&signed.suggestion);
     let sig = Signature::from_bytes(&signed.signature);
-    pk.verify(&body, &sig).map_err(|_| LedgerError::BadSignature)?;
-    let recomputed: [u8; 32] = *blake3::hash(&canonical_json_bytes(&signed.suggestion.rule)).as_bytes();
+    pk.verify(&body, &sig)
+        .map_err(|_| LedgerError::BadSignature)?;
+    let recomputed: [u8; 32] =
+        *blake3::hash(&canonical_json_bytes(&signed.suggestion.rule)).as_bytes();
     if recomputed != signed.suggestion.pattern_hash {
         return Err(LedgerError::HashMismatch);
     }

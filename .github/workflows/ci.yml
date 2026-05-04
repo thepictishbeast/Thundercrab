@@ -1,0 +1,58 @@
+name: ci
+
+# fmt + clippy + test + doc gates. thundercrab-gui is excluded from
+# compile-side jobs because it depends on winit, which can't build
+# in a headless CI environment ("The platform you're compiling for
+# is not supported by winit"). This matches the workspace's
+# default-members exclusion.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: [self-hosted, linux, x64, plausiden]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: [self-hosted, linux, x64, plausiden]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --exclude thundercrab-gui --all-targets --locked
+
+  test:
+    name: test
+    runs-on: [self-hosted, linux, x64, plausiden]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --exclude thundercrab-gui --locked
+
+  doc:
+    name: doc
+    runs-on: [self-hosted, linux, x64, plausiden]
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --workspace --exclude thundercrab-gui --no-deps --locked

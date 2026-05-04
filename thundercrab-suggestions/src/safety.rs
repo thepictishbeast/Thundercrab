@@ -65,9 +65,7 @@ pub fn is_safe_match(expr: &MatchExpr) -> bool {
         | MatchExpr::HeaderContains { .. }
         | MatchExpr::FromDomainIn { .. }
         | MatchExpr::SubjectContainsAny { .. } => true,
-        MatchExpr::All { exprs } | MatchExpr::Any { exprs } => {
-            exprs.iter().all(is_safe_match)
-        }
+        MatchExpr::All { exprs } | MatchExpr::Any { exprs } => exprs.iter().all(is_safe_match),
         MatchExpr::Not { expr } => is_safe_match(expr),
     }
 }
@@ -225,9 +223,7 @@ mod tests {
     fn safe_match_accepts_all_current_variants() {
         for expr in [
             MatchExpr::Always,
-            MatchExpr::HasHeader {
-                header: "X".into(),
-            },
+            MatchExpr::HasHeader { header: "X".into() },
             MatchExpr::HeaderContains {
                 header: "X".into(),
                 substring: "y".into(),

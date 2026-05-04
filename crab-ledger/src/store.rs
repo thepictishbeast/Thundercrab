@@ -220,10 +220,14 @@ mod tests {
     fn aggregation_counts_distinct_pubkeys() {
         let s = Store::open_in_memory().unwrap();
         // Three keys vote for pattern A, one votes for pattern B.
-        s.upsert(&row([1; 32], [10; 32], "{\"id\":\"A\"}", 100)).unwrap();
-        s.upsert(&row([1; 32], [11; 32], "{\"id\":\"A\"}", 101)).unwrap();
-        s.upsert(&row([1; 32], [12; 32], "{\"id\":\"A\"}", 102)).unwrap();
-        s.upsert(&row([2; 32], [10; 32], "{\"id\":\"B\"}", 200)).unwrap();
+        s.upsert(&row([1; 32], [10; 32], "{\"id\":\"A\"}", 100))
+            .unwrap();
+        s.upsert(&row([1; 32], [11; 32], "{\"id\":\"A\"}", 101))
+            .unwrap();
+        s.upsert(&row([1; 32], [12; 32], "{\"id\":\"A\"}", 102))
+            .unwrap();
+        s.upsert(&row([2; 32], [10; 32], "{\"id\":\"B\"}", 200))
+            .unwrap();
 
         let all = s.list_aggregated(1, None).unwrap();
         assert_eq!(all.len(), 2);

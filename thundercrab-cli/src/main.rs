@@ -28,8 +28,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use thundercrab_imap::{
-    AccountConfig, Backend,
-    managesieve,
+    AccountConfig, Backend, managesieve,
     rust_imap::RustImapBackend,
     smtp::{OutboundMessage, SmtpEncryption, send_message},
 };
@@ -104,8 +103,7 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<()> {
     let cfg = load_config()?;
-    let password = std::env::var("IMAP_PASSWORD")
-        .context("IMAP_PASSWORD env var must be set")?;
+    let password = std::env::var("IMAP_PASSWORD").context("IMAP_PASSWORD env var must be set")?;
 
     match cli.command {
         Cmd::List => cmd_list(&cfg, &password).await,
@@ -117,9 +115,7 @@ async fn run(cli: Cli) -> Result<()> {
             subject,
             body,
             encryption,
-        } => {
-            cmd_send(&cfg, &password, &to, &cc, &subject, &body, &encryption).await
-        }
+        } => cmd_send(&cfg, &password, &to, &cc, &subject, &body, &encryption).await,
     }
 }
 
@@ -145,12 +141,7 @@ async fn cmd_list(cfg: &AccountConfig, password: &str) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_fetch(
-    cfg: &AccountConfig,
-    password: &str,
-    folder: &str,
-    limit: u32,
-) -> Result<()> {
+async fn cmd_fetch(cfg: &AccountConfig, password: &str, folder: &str, limit: u32) -> Result<()> {
     let backend = RustImapBackend::connect(cfg, password)
         .await
         .map_err(|e| anyhow!("connect: {e}"))?;
@@ -181,12 +172,16 @@ async fn cmd_push_sieve(
     name: &str,
     path: &std::path::Path,
 ) -> Result<()> {
-    let script = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let script =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     managesieve::put_active_script(cfg, password, name, &script)
         .await
         .map_err(|e| anyhow!("put_active_script: {e}"))?;
-    println!("ok: pushed {} bytes as `{}`, set active", script.len(), name);
+    println!(
+        "ok: pushed {} bytes as `{}`, set active",
+        script.len(),
+        name
+    );
     Ok(())
 }
 
@@ -221,7 +216,11 @@ async fn cmd_send(
     let enc = match encryption {
         "starttls" => SmtpEncryption::StartTls,
         "implicit" => SmtpEncryption::ImplicitTls,
-        other => return Err(anyhow!("unknown encryption {other:?}, expected starttls|implicit")),
+        other => {
+            return Err(anyhow!(
+                "unknown encryption {other:?}, expected starttls|implicit"
+            ));
+        }
     };
     send_message(cfg, password, enc, &msg)
         .await

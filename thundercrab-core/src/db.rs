@@ -111,11 +111,9 @@ impl Db {
                  ON flag_events(from_domain_with_at);",
         )?;
         let found = conn
-            .query_row(
-                "SELECT MAX(version) FROM schema_version",
-                [],
-                |r| r.get::<_, Option<i64>>(0),
-            )
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| {
+                r.get::<_, Option<i64>>(0)
+            })
             .optional()?
             .flatten()
             .unwrap_or(0);
@@ -157,11 +155,13 @@ impl Db {
     }
 
     /// Load every rule, ordered by score desc then id asc — the same
-    /// order [`mail_config::CategoryRules::evaluate`] uses.
+    /// order `mail_config::CategoryRules::evaluate` uses
+    /// (Mailroom-side; not a direct dep here, so written as plain
+    /// code span rather than an intra-doc link).
     pub fn load_rules(&self) -> DbResult<Vec<CrabRule>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT json FROM rules ORDER BY score DESC, id ASC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT json FROM rules ORDER BY score DESC, id ASC")?;
         let rows = stmt
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -174,7 +174,9 @@ impl Db {
 
     /// Delete a rule by id. Returns `true` if a row was removed.
     pub fn delete_rule(&self, id: &str) -> DbResult<bool> {
-        let n = self.conn.execute("DELETE FROM rules WHERE id = ?1", params![id])?;
+        let n = self
+            .conn
+            .execute("DELETE FROM rules WHERE id = ?1", params![id])?;
         Ok(n > 0)
     }
 
@@ -221,9 +223,7 @@ impl Db {
 
     /// Count flag events grouped by `(from_domain_with_at, destination)`
     /// — feeds the "users who move @x.com to Y consistently" derivation.
-    pub fn flag_counts_by_domain_dest(
-        &self,
-    ) -> DbResult<Vec<(String, String, i64)>> {
+    pub fn flag_counts_by_domain_dest(&self) -> DbResult<Vec<(String, String, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT from_domain_with_at, destination, COUNT(*)
              FROM flag_events
@@ -297,9 +297,7 @@ mod tests {
                 id: id.into(),
                 display_name: id.into(),
                 when: MatchExpr::Always,
-                action: Action::FileInto {
-                    folder: "X".into(),
-                },
+                action: Action::FileInto { folder: "X".into() },
                 score,
                 stop_on_match: false,
                 origin: RuleOrigin::Platform,
@@ -345,9 +343,7 @@ mod tests {
             id: "x".into(),
             display_name: "x".into(),
             when: MatchExpr::Always,
-            action: Action::FileInto {
-                folder: "X".into(),
-            },
+            action: Action::FileInto { folder: "X".into() },
             score: 1,
             stop_on_match: false,
             origin: RuleOrigin::User,

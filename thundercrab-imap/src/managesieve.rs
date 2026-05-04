@@ -79,7 +79,10 @@ pub async fn put_active_script(
     read_until_ok(&mut stream).await?;
 
     // STARTTLS upgrade. Send the verb, read OK, then wrap.
-    stream.get_mut().write_all(b"STARTTLS\r\n").await
+    stream
+        .get_mut()
+        .write_all(b"STARTTLS\r\n")
+        .await
         .map_err(|e| BackendError::Transport(format!("STARTTLS write: {e}")))?;
     read_until_ok(&mut stream).await?;
     let tcp = stream.into_inner();
@@ -305,8 +308,7 @@ fn escape_quoted(s: &str) -> String {
 /// few hundred bytes max) so a hand-rolled implementation is fine
 /// and saves a dependency.
 fn base64_encode(input: &[u8]) -> String {
-    const CHARS: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= input.len() {

@@ -86,12 +86,10 @@ impl AppState {
     /// the const definitions above guard.
     #[must_use]
     pub fn new(store: Store) -> Self {
-        let per_key_quota = Quota::per_hour(
-            NonZeroU32::new(PER_PUBKEY_PER_HOUR).expect("PER_PUBKEY_PER_HOUR > 0"),
-        );
-        let global_quota = Quota::per_hour(
-            NonZeroU32::new(GLOBAL_PER_HOUR).expect("GLOBAL_PER_HOUR > 0"),
-        );
+        let per_key_quota =
+            Quota::per_hour(NonZeroU32::new(PER_PUBKEY_PER_HOUR).expect("PER_PUBKEY_PER_HOUR > 0"));
+        let global_quota =
+            Quota::per_hour(NonZeroU32::new(GLOBAL_PER_HOUR).expect("GLOBAL_PER_HOUR > 0"));
         Self {
             store: tokio::sync::Mutex::new(store),
             per_key: RateLimiter::dashmap(per_key_quota),
@@ -344,8 +342,7 @@ async fn handle_suggestions(
         .take(limit)
         .map(|a| SuggestionEntry {
             pattern_hash: a.pattern_hash_hex,
-            rule: serde_json::from_str(&a.rule_json)
-                .unwrap_or(serde_json::Value::Null),
+            rule: serde_json::from_str(&a.rule_json).unwrap_or(serde_json::Value::Null),
             corroborators: a.corroborators,
             first_seen_day: a.first_seen_day,
         })
@@ -579,7 +576,10 @@ mod tests {
             .unwrap();
         let body = to_bytes(resp.into_body(), 16 * 1024).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["suggestions"].as_array().unwrap()[0]["corroborators"], 3);
+        assert_eq!(
+            json["suggestions"].as_array().unwrap()[0]["corroborators"],
+            3
+        );
     }
 
     #[tokio::test]

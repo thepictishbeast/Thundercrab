@@ -71,11 +71,7 @@ pub fn derive_rule_candidates(
             continue;
         }
 
-        let id = format!(
-            "derived_{}_to_{}",
-            sanitize_id(domain),
-            sanitize_id(dest)
-        );
+        let id = format!("derived_{}_to_{}", sanitize_id(domain), sanitize_id(dest));
         let rule = CrabRule {
             id,
             display_name: format!("{dest} (derived from {domain})"),

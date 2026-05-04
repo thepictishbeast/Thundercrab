@@ -26,8 +26,7 @@ use thundercrab_imap::{AccountConfig, Backend, rust_imap::RustImapBackend};
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -49,7 +48,10 @@ async fn main() -> ExitCode {
 
     let cfg = AccountConfig::plausiden(host, user);
 
-    println!("connecting to {}:{} as {}", cfg.imap_host, cfg.imap_port, cfg.username);
+    println!(
+        "connecting to {}:{} as {}",
+        cfg.imap_host, cfg.imap_port, cfg.username
+    );
     let backend = match RustImapBackend::connect(&cfg, &pass).await {
         Ok(b) => b,
         Err(e) => {
@@ -62,7 +64,10 @@ async fn main() -> ExitCode {
     match backend.list_folders().await {
         Ok(folders) => {
             for f in &folders {
-                println!("  {:>6} unread / {:>6} total   {}", f.unseen, f.messages, f.name);
+                println!(
+                    "  {:>6} unread / {:>6} total   {}",
+                    f.unseen, f.messages, f.name
+                );
             }
         }
         Err(e) => {

@@ -63,15 +63,17 @@ fn arb_rule_with_safe_action() -> impl Strategy<Value = CrabRule> {
         .prop_filter("avoid protected folders by name", |t| {
             !["INBOX", "Inbox", "inbox", "Important"].contains(&t.6.as_str())
         })
-        .prop_map(|(id, display_name, when, score, stop, origin, folder)| CrabRule {
-            id,
-            display_name,
-            when,
-            action: Action::FileInto { folder },
-            score,
-            stop_on_match: stop,
-            origin,
-        })
+        .prop_map(
+            |(id, display_name, when, score, stop, origin, folder)| CrabRule {
+                id,
+                display_name,
+                when,
+                action: Action::FileInto { folder },
+                score,
+                stop_on_match: stop,
+                origin,
+            },
+        )
 }
 
 proptest! {

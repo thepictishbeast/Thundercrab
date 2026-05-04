@@ -108,9 +108,7 @@ mod tests {
             id: "t".into(),
             display_name: "T".into(),
             when: MatchExpr::Always,
-            action: Action::FileInto {
-                folder: "X".into(),
-            },
+            action: Action::FileInto { folder: "X".into() },
             score: 1,
             stop_on_match: false,
             origin: RuleOrigin::User,
