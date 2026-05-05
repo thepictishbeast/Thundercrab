@@ -110,7 +110,7 @@ fn check_action(action: &Action) -> Result<(), SafetyError> {
             Ok(())
         }
         Action::SetFlag { flag } => {
-            if PROTECTED_FLAGS.iter().any(|p| *p == flag.as_str()) {
+            if PROTECTED_FLAGS.contains(&flag.as_str()) {
                 return Err(SafetyError::ProtectedFlag { flag: flag.clone() });
             }
             Ok(())

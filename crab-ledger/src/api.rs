@@ -240,17 +240,14 @@ async fn handle_submit(
         }
     };
 
-    let rule_json = match canonical_rule_json(&suggestion.rule) {
-        Ok(j) => j,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "encode_failure",
-                }),
-            )
-                .into_response();
-        }
+    let Ok(rule_json) = canonical_rule_json(&suggestion.rule) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "encode_failure",
+            }),
+        )
+            .into_response();
     };
 
     let row = CorroborationRow {

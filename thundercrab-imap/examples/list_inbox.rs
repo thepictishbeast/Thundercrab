@@ -31,19 +31,13 @@ async fn main() -> ExitCode {
         .init();
 
     let host = env::var("IMAP_HOST").unwrap_or_else(|_| "mail.plausiden.com".into());
-    let user = match env::var("IMAP_USER") {
-        Ok(u) => u,
-        Err(_) => {
-            eprintln!("error: IMAP_USER not set");
-            return ExitCode::from(2);
-        }
+    let Ok(user) = env::var("IMAP_USER") else {
+        eprintln!("error: IMAP_USER not set");
+        return ExitCode::from(2);
     };
-    let pass = match env::var("IMAP_PASSWORD") {
-        Ok(p) => p,
-        Err(_) => {
-            eprintln!("error: IMAP_PASSWORD not set");
-            return ExitCode::from(2);
-        }
+    let Ok(pass) = env::var("IMAP_PASSWORD") else {
+        eprintln!("error: IMAP_PASSWORD not set");
+        return ExitCode::from(2);
     };
 
     let cfg = AccountConfig::plausiden(host, user);
