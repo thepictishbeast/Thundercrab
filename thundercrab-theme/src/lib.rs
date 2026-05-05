@@ -157,6 +157,7 @@ fn parse_hex(hex: &str) -> Color {
 
 /// Parse `H S% L%` (Tailwind's HSL form, no commas, percent signs
 /// on S and L). Returns opaque black on malformed input.
+#[allow(clippy::many_single_char_names)] // h, s, l are HSL standard.
 fn parse_hsl(s: &str) -> Color {
     let mut parts = s.split_whitespace();
     let h = parts.next().and_then(|p| p.parse::<f32>().ok());
@@ -176,11 +177,21 @@ fn parse_hsl(s: &str) -> Color {
 }
 
 /// Standard HSL→RGB conversion; outputs are 0..=1 floats.
+//
+// Single-letter bindings here track the canonical HSL→RGB math
+// (chroma, x-second-component, lightness floor) in every reference
+// implementation. Renaming would obscure the algorithm, not clarify
+// it, so the lint is acknowledged once for the function.
+#[allow(clippy::many_single_char_names)]
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     let c = (1.0 - 2.0f32.mul_add(l, -1.0).abs()) * s;
     let h_prime = h / 60.0;
     let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
-    let (r1, g1, b1) = match h_prime as i32 {
+    // h is CSS degrees in 0..360, so h_prime ∈ [0, 6); the cast is
+    // a sextant-floor lookup, never NaN, never negative, never > 5.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let sextant = h_prime as i32;
+    let (r1, g1, b1) = match sextant {
         0 => (c, x, 0.0),
         1 => (x, c, 0.0),
         2 => (0.0, c, x),

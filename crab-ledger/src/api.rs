@@ -313,6 +313,10 @@ struct SuggestionsResponse {
     suggestions: Vec<SuggestionEntry>,
 }
 
+// nursery's significant_drop_tightening wants the guard dropped earlier,
+// but the handler body is short and the contention savings are
+// unmeasurable at this scale.
+#[allow(clippy::significant_drop_tightening)]
 async fn handle_suggestions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<SuggestionsQuery>,
@@ -353,6 +357,7 @@ struct HealthResponse {
     total_unique_patterns: i64,
 }
 
+#[allow(clippy::significant_drop_tightening)] // see handle_suggestions.
 async fn handle_health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let guard = state.store.lock().await;
     let total = guard.total_unique_patterns().unwrap_or(0);
@@ -423,7 +428,7 @@ mod tests {
     /// Brute-force mine a PoW nonce for a `SignedSuggestion`. With
     /// the configured 16-bit difficulty, expected work is ~32K
     /// hashes — fast for tests.
-    fn mine_envelope(signed: SignedSuggestion) -> Vec<u8> {
+    fn mine_envelope(signed: &SignedSuggestion) -> Vec<u8> {
         let pattern_hash = signed.suggestion.pattern_hash;
         let public_key = signed.public_key;
         for nonce in 0u64..u64::MAX {
@@ -462,7 +467,7 @@ mod tests {
         let app = build_app();
         let key = InstallKey::generate();
         let signed = key.sign(Suggestion::new(fixture_rule("Promotions")));
-        let body = mine_envelope(signed);
+        let body = mine_envelope(&signed);
 
         let resp = app
             .clone()
@@ -505,7 +510,7 @@ mod tests {
         let app = build_app();
         let key = InstallKey::generate();
         let signed = key.sign(Suggestion::new(fixture_rule("Updates")));
-        let body = mine_envelope(signed);
+        let body = mine_envelope(&signed);
 
         for _ in 0..3 {
             let resp = app
@@ -546,7 +551,7 @@ mod tests {
         for _ in 0..3 {
             let k = InstallKey::generate();
             let s = k.sign(Suggestion::new(rule.clone()));
-            let body = mine_envelope(s);
+            let body = mine_envelope(&s);
             let resp = app
                 .clone()
                 .oneshot(
@@ -585,7 +590,7 @@ mod tests {
         let mut signed = key.sign(Suggestion::new(fixture_rule("Promotions")));
         // Flip a bit in the signature — must fail verify().
         signed.signature[0] ^= 0xff;
-        let body = mine_envelope(signed);
+        let body = mine_envelope(&signed);
         let resp = app
             .oneshot(
                 Request::builder()
