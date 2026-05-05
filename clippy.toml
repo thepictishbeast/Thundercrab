@@ -1,0 +1,8 @@
+# Proper nouns / protocol names that read fine as prose in
+# rustdoc without backticks. Extends rustc-default doc-valid-idents.
+doc-valid-idents = [
+    "PlausiDen", "ManageSieve", "SQLite", "Snake_case",
+    "PoW", "SignedSuggestion", "FileInto", "SetFlag", "blake3",
+    "public_key", "pattern_hash", "nonce_le_bytes", "snake_case",
+    "..",
+]
