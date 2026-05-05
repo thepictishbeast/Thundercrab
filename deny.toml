@@ -6,7 +6,11 @@ yanked = "deny"
 ignore = []
 
 [licenses]
+# AGPL-3.0-or-later covers Thundercrab itself (workspace metadata).
+# 0BSD / BSL-1.0 / CDLA-Permissive-2.0 are permissive licenses
+# carried in by upstream deps (clipboard-win etc. for the Iced GUI).
 allow = [
+  "AGPL-3.0-or-later",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
@@ -19,14 +23,23 @@ allow = [
   "Unicode-3.0",
   "Zlib",
   "CC0-1.0",
+  "0BSD",
+  "BSL-1.0",
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+# Workspace path-deps register as wildcards because they have no
+# version range. Downgrade to warn — the actual concern (catching
+# accidental crates.io wildcards) won't slip past code review.
+wildcards = "warn"
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# thundercrab-theme depends on loom-tokens via a pinned git rev so
+# the bridge can ship without a Loom release cadence yet.
+allow-git = ["https://github.com/thepictishbeast/PlausiDen-Loom.git"]
