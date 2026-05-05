@@ -77,6 +77,12 @@ pub fn is_safe_match(expr: &MatchExpr) -> bool {
 /// enter the local store. Callers should never persist a `RuleOrigin::
 /// Federated` rule that did not come through here — the `Db` layer
 /// trusts what it gets.
+///
+/// # Errors
+/// `SafetyError::UnsafeMatch` when the predicate is too permissive
+/// for federated origin; `SafetyError::ProtectedFolder` /
+/// `ProtectedFlag` if the action targets a reserved destination;
+/// other `SafetyError` variants for action-specific safety checks.
 pub fn apply_suggestion(rule: &CrabRule) -> Result<CrabRule, SafetyError> {
     if !is_safe_match(&rule.when) {
         return Err(SafetyError::UnsafeMatch);

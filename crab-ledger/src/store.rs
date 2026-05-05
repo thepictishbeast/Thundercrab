@@ -77,12 +77,18 @@ pub struct Store {
 impl Store {
     /// Open or create the SQLite store at `path`. Use `:memory:` for
     /// an in-process test store.
+    ///
+    /// # Errors
+    /// `StoreError::Sqlite` if the connection or schema-init fails.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
         Self::init(conn)
     }
 
     /// Open an in-memory store. Test-only.
+    ///
+    /// # Errors
+    /// `StoreError::Sqlite` if the in-memory init fails.
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         Self::init(conn)
@@ -113,6 +119,9 @@ impl Store {
     /// (i.e., a row was inserted, not just updated). Useful for the
     /// `/v1/submit` endpoint to honestly report "newly counted" vs
     /// "duplicate".
+    ///
+    /// # Errors
+    /// `StoreError::Sqlite` for the underlying SELECT or INSERT.
     pub fn upsert(&self, row: &CorroborationRow) -> Result<bool, StoreError> {
         let existed: bool = self
             .conn
@@ -149,6 +158,9 @@ impl Store {
     ///
     /// Sorted by corroborator count descending then `pattern_hash` for
     /// deterministic output.
+    ///
+    /// # Errors
+    /// `StoreError::Sqlite` for the GROUP-BY query or row decoding.
     pub fn list_aggregated(
         &self,
         min_corroborators: i64,
@@ -183,6 +195,9 @@ impl Store {
     }
 
     /// Total distinct pattern_hash count — for `/v1/health`.
+    ///
+    /// # Errors
+    /// `StoreError::Sqlite` for the COUNT(DISTINCT) query.
     pub fn total_unique_patterns(&self) -> Result<i64, StoreError> {
         Ok(self.conn.query_row(
             "SELECT COUNT(DISTINCT pattern_hash) FROM corroborations",

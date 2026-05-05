@@ -147,6 +147,12 @@ pub enum LedgerError {
 ///   2. `pattern_hash` actually matches the rule's canonical hash.
 ///
 /// Returns the verified suggestion on success.
+///
+/// # Errors
+/// `LedgerError::BadKey` when the public-key bytes don't decode;
+/// `LedgerError::BadSignature` when the signature fails to verify;
+/// `LedgerError::HashMismatch` when the rule's canonical hash
+/// doesn't match the declared `pattern_hash`.
 pub fn verify(signed: &SignedSuggestion) -> Result<&Suggestion, LedgerError> {
     let pk = VerifyingKey::from_bytes(&signed.public_key).map_err(|_| LedgerError::BadKey)?;
     let body = canonical_json_bytes(&signed.suggestion);
