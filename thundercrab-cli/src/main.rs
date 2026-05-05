@@ -133,7 +133,7 @@ async fn cmd_list(cfg: &AccountConfig, password: &str) -> Result<()> {
         .list_folders()
         .await
         .map_err(|e| anyhow!("list_folders: {e}"))?;
-    println!("{:>6}  {:>6}  {}", "UNREAD", "TOTAL", "FOLDER");
+    println!("{:>6}  {:>6}  FOLDER", "UNREAD", "TOTAL");
     for f in &folders {
         println!("{:>6}  {:>6}  {}", f.unseen, f.messages, f.name);
     }

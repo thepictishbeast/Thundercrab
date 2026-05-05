@@ -177,7 +177,7 @@ fn parse_hsl(s: &str) -> Color {
 
 /// Standard HSL→RGB conversion; outputs are 0..=1 floats.
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let c = (1.0 - 2.0f32.mul_add(l, -1.0).abs()) * s;
     let h_prime = h / 60.0;
     let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
     let (r1, g1, b1) = match h_prime as i32 {

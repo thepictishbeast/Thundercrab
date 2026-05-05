@@ -99,7 +99,6 @@ impl AppState {
 }
 
 /// Build the router. Caller wires it up in `main`.
-#[must_use]
 pub fn router(state: Arc<AppState>) -> Router {
     let robots = SetResponseHeaderLayer::overriding(
         HeaderName::from_static("x-robots-tag"),
