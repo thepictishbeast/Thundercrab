@@ -69,12 +69,20 @@ impl Db {
     ///
     /// BUG ASSUMPTION: The caller has already created the parent dir
     /// with appropriate permissions. We do not `mkdir -p` here.
+    ///
+    /// # Errors
+    /// `DbError::Sqlite` for connection / migration failures;
+    /// `DbError::SchemaTooNew` when the on-disk schema is newer than
+    /// this binary supports.
     pub fn open(path: impl AsRef<Path>) -> DbResult<Self> {
         let conn = Connection::open(path)?;
         Self::init(conn)
     }
 
     /// Open an in-memory DB. Test-only convenience.
+    ///
+    /// # Errors
+    /// Same `DbError` variants as [`Self::open`].
     pub fn open_in_memory() -> DbResult<Self> {
         let conn = Connection::open_in_memory()?;
         Self::init(conn)
@@ -134,6 +142,10 @@ impl Db {
 
     /// Upsert a rule. The id is the primary key — re-saving an existing
     /// id replaces the row.
+    ///
+    /// # Errors
+    /// `DbError::Json` if the rule fails to serialize;
+    /// `DbError::Sqlite` for the underlying upsert.
     pub fn save_rule(&self, rule: &CrabRule) -> DbResult<()> {
         let json = serde_json::to_string(rule)?;
         let origin = match rule.origin {
@@ -158,6 +170,10 @@ impl Db {
     /// order `mail_config::CategoryRules::evaluate` uses
     /// (Mailroom-side; not a direct dep here, so written as plain
     /// code span rather than an intra-doc link).
+    ///
+    /// # Errors
+    /// `DbError::Sqlite` for the SELECT; `DbError::Json` for any
+    /// stored row that fails to deserialize.
     pub fn load_rules(&self) -> DbResult<Vec<CrabRule>> {
         let mut stmt = self
             .conn
@@ -173,6 +189,9 @@ impl Db {
     }
 
     /// Delete a rule by id. Returns `true` if a row was removed.
+    ///
+    /// # Errors
+    /// `DbError::Sqlite` for the underlying DELETE.
     pub fn delete_rule(&self, id: &str) -> DbResult<bool> {
         let n = self
             .conn
@@ -182,6 +201,10 @@ impl Db {
 
     /// Record a flag event. `UNIQUE(message_hash, source, destination)`
     /// makes repeated calls for the same observation a no-op.
+    ///
+    /// # Errors
+    /// `DbError::Json` if the subject-tokens vector fails to
+    /// serialize; `DbError::Sqlite` for the INSERT.
     pub fn record_flag(&self, ev: &FlagEvent) -> DbResult<()> {
         let source = match ev.source {
             FlagSource::ManualMove => "manual_move",
@@ -213,6 +236,9 @@ impl Db {
 
     /// Count how many flag events route to a given destination — input
     /// for the suggestion-derivation algorithm.
+    ///
+    /// # Errors
+    /// `DbError::Sqlite` for the SELECT.
     pub fn count_flags_to(&self, destination: &str) -> DbResult<i64> {
         Ok(self.conn.query_row(
             "SELECT COUNT(*) FROM flag_events WHERE destination = ?1",
@@ -223,6 +249,9 @@ impl Db {
 
     /// Count flag events grouped by `(from_domain_with_at, destination)`
     /// — feeds the "users who move @x.com to Y consistently" derivation.
+    ///
+    /// # Errors
+    /// `DbError::Sqlite` for the GROUP BY query or row decoding.
     pub fn flag_counts_by_domain_dest(&self) -> DbResult<Vec<(String, String, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT from_domain_with_at, destination, COUNT(*)
