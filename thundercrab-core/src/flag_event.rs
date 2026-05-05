@@ -9,6 +9,8 @@
 //! *features* survive (see `FeatureBag`); the content hash and per-user
 //! timestamps stay local.
 
+use std::fmt::Write as _;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -67,10 +69,11 @@ impl FlagEvent {
     /// transmitted off-device.
     #[must_use]
     pub fn message_hash_hex(&self) -> String {
-        self.message_hash
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        let mut out = String::with_capacity(self.message_hash.len() * 2);
+        for b in &self.message_hash {
+            let _ = write!(out, "{b:02x}");
+        }
+        out
     }
 }
 

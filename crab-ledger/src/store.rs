@@ -26,6 +26,7 @@
 //! ledger's prior verification.
 
 use rusqlite::{Connection, OptionalExtension, params};
+use std::fmt::Write as _;
 use std::path::Path;
 use thiserror::Error;
 
@@ -180,8 +181,12 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![min_corroborators, since], |r| {
             let pattern_hash: Vec<u8> = r.get(0)?;
+            let mut hex = String::with_capacity(pattern_hash.len() * 2);
+            for b in &pattern_hash {
+                let _ = write!(hex, "{b:02x}");
+            }
             Ok(AggregatedSuggestion {
-                pattern_hash_hex: pattern_hash.iter().map(|b| format!("{b:02x}")).collect(),
+                pattern_hash_hex: hex,
                 rule_json: r.get(1)?,
                 corroborators: r.get(2)?,
                 first_seen_day: r.get(3)?,

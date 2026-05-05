@@ -46,17 +46,13 @@ use loom_tokens::{ColorRole, FontSize, Radius, Spacing};
 /// hygiene only.
 #[must_use]
 pub fn color_light(role: &str) -> Color {
-    ColorRole::by_name(role)
-        .map(|r| parse_css(r.color.css))
-        .unwrap_or(Color::BLACK)
+    ColorRole::by_name(role).map_or(Color::BLACK, |r| parse_css(r.color.css))
 }
 
 /// Convert a Loom [`ColorRole`] (dark theme) to an Iced [`Color`].
 #[must_use]
 pub fn color_dark(role: &str) -> Color {
-    ColorRole::dark_by_name(role)
-        .map(|r| parse_css(r.color.css))
-        .unwrap_or(Color::BLACK)
+    ColorRole::dark_by_name(role).map_or(Color::BLACK, |r| parse_css(r.color.css))
 }
 
 /// Map a Loom [`Spacing`] step to pixels.
