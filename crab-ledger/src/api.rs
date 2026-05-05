@@ -402,7 +402,7 @@ mod tests {
     fn fixture_rule(folder: &str) -> CrabRule {
         CrabRule {
             id: format!("test_{folder}").to_lowercase(),
-            display_name: format!("Test {folder}").into(),
+            display_name: format!("Test {folder}"),
             when: MatchExpr::HasHeader {
                 header: "List-Unsubscribe".into(),
             },

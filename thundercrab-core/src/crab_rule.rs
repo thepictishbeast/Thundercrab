@@ -35,11 +35,11 @@ pub enum MatchExpr {
     /// `Subject:` contains any listed substring (case-insensitive).
     SubjectContainsAny { needles: Vec<String> },
     /// All sub-expressions match.
-    All { exprs: Vec<MatchExpr> },
+    All { exprs: Vec<Self> },
     /// Any sub-expression matches.
-    Any { exprs: Vec<MatchExpr> },
+    Any { exprs: Vec<Self> },
     /// Sub-expression does not match.
-    Not { expr: Box<MatchExpr> },
+    Not { expr: Box<Self> },
 }
 
 /// Action when a rule fires. Mirrors `mail_config::Action`.
@@ -52,7 +52,7 @@ pub enum Action {
     /// Set an IMAP flag (`\Flagged`, `$Important`, etc.) without moving.
     SetFlag { flag: String },
     /// Multiple actions in order.
-    Sequence { actions: Vec<Action> },
+    Sequence { actions: Vec<Self> },
 }
 
 /// Where a rule came from — drives precedence and trust.

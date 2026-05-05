@@ -39,7 +39,7 @@ pub enum SafetyError {
     /// A `Sequence` action contains a sub-action that violates one of
     /// the above; reported with the inner failure.
     #[error("nested action violation: {0}")]
-    Nested(Box<SafetyError>),
+    Nested(Box<Self>),
 }
 
 /// Folders federated rules cannot file *into*. These are folders the
