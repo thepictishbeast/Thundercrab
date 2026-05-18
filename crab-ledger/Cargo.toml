@@ -29,7 +29,7 @@ tracing-subscriber = { workspace = true }
 # Per-pubkey rate limiting for /v1/submit. Same crate the
 # plausiden-site contact form uses; the keyed limiter wraps a
 # token-bucket per public key.
-governor = "0.8"
+governor = "0.10"
 # PoW gate uses blake3 over (pattern_hash || pubkey || nonce).
 blake3 = { workspace = true }
 
