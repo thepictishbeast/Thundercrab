@@ -6,6 +6,7 @@ members = [
     "thundercrab-cli",
     "thundercrab-gui",
     "thundercrab-suggestions",
+    "thundercrab-ffi",
     "crab-ledger",
 ]
 # `cargo build` from the workspace root excludes the GUI by default
@@ -17,6 +18,7 @@ default-members = [
     "thundercrab-imap",
     "thundercrab-cli",
     "thundercrab-suggestions",
+    "thundercrab-ffi",
     "crab-ledger",
 ]
 

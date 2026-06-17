@@ -1,0 +1,17 @@
+[package]
+name = "thundercrab-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "UniFFI binding surface over thundercrab-core/imap for native UIs (Android first, then desktop)."
+
+# cdylib + staticlib are what Android (.so via cargo-ndk) and iOS link against;
+# lib keeps it usable as a normal Rust dependency too.
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+uniffi = { version = "0.28" }
+thundercrab-core = { path = "../thundercrab-core" }
