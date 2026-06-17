@@ -5,7 +5,7 @@
 //! We can't depend on `mail-config` directly without making the
 //! Secure-Email repo a workspace dep, so we pin a fixture: a JSON blob
 //! that `mail-config` is documented to emit, plus the `origin` field
-//! Thundercrab needs. Round-trip it and assert structural identity.
+//! ThunderCrab needs. Round-trip it and assert structural identity.
 //!
 //! If this test breaks, **either** `mail-config::CategoryRule` got a
 //! new field that wasn't mirrored here, **or** `CrabRule`'s serde tags

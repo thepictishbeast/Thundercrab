@@ -1,6 +1,6 @@
 //! Concrete IMAPS [`Backend`] using `async-imap` over `tokio-rustls`.
 //!
-//! Production path for Thundercrab's mail surface. Connects to the
+//! Production path for ThunderCrab's mail surface. Connects to the
 //! configured IMAPS host over TLS (port 993 by default), authenticates
 //! with `LOGIN`, and exposes `list_folders` / `fetch_headers` /
 //! `move_message` / `set_flag` against the server's UIDs.

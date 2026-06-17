@@ -1,4 +1,4 @@
-# Thundercrab Roadmap — Android-first, Rust-core, server-coupled
+# ThunderCrab Roadmap — Android-first, Rust-core, server-coupled
 
 **Decision (2026-06-17).** One Rust core, thin native UIs over it. Ship order:
 **Android first → Linux desktop → deepen PlausiDen-server coupling.** The Iced

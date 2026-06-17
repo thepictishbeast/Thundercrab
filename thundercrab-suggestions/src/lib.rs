@@ -2,7 +2,7 @@
 //!
 //! ## What this is
 //!
-//! Every Thundercrab install observes its user's flag events
+//! Every ThunderCrab install observes its user's flag events
 //! ([`thundercrab_core::FlagEvent`]) and *derives* candidate rules from
 //! patterns in those events — "this user moves @mailchimp.com → Promotions
 //! every time" becomes a candidate rule.

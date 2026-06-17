@@ -1,7 +1,7 @@
 //! SMTP submission client (RFC 5321 + RFC 6409) — outbound mail.
 //!
-//! Thundercrab uses lettre for the wire-level submission protocol;
-//! this module is the thin wrapper that translates a Thundercrab
+//! ThunderCrab uses lettre for the wire-level submission protocol;
+//! this module is the thin wrapper that translates a ThunderCrab
 //! `OutboundMessage` into a `lettre::Message` and ships it through
 //! a `tokio1-rustls-tls` SMTP transport. The credentials and host
 //! come from the same `AccountConfig` the IMAP and `ManageSieve`
@@ -26,7 +26,7 @@
 //! * Not a relay. Authenticates as the account user; the user is
 //!   the From: principal. Sending as someone else is out of scope.
 //! * Not a bulk sender. Per-message connection (lettre handles
-//!   pooling internally, but Thundercrab's GUI submits one at a
+//!   pooling internally, but ThunderCrab's GUI submits one at a
 //!   time anyway).
 
 use lettre::message::Mailbox;
@@ -45,7 +45,7 @@ pub enum SmtpEncryption {
     ImplicitTls,
 }
 
-/// Thundercrab-side message description. Translated to a
+/// ThunderCrab-side message description. Translated to a
 /// `lettre::Message` inside [`send_message`]; lettre then handles
 /// MIME encoding, address validation, and the wire submission.
 #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ pub struct OutboundMessage<'a> {
     pub cc: &'a [&'a str],
     /// `Subject:` line.
     pub subject: &'a str,
-    /// Plain-text body. Thundercrab's v0 sends text/plain only;
+    /// Plain-text body. ThunderCrab's v0 sends text/plain only;
     /// HTML bodies are a follow-up once the editor exists.
     pub body: &'a str,
 }

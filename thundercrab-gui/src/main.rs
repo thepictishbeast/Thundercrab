@@ -1,4 +1,4 @@
-//! `thundercrab` — desktop GUI for the Thundercrab mail client.
+//! `thundercrab` — desktop GUI for the ThunderCrab mail client.
 //!
 //! First-window scaffold. The app boots into a connection screen
 //! that takes the IMAP host / user / password, calls
@@ -23,7 +23,7 @@
 //!   * Cross-platform without bundling a 200MB system runtime.
 //!     Distribution is one binary per platform; the Loom GTK
 //!     theme generator stays useful for any GTK app the user
-//!     runs alongside Thundercrab.
+//!     runs alongside ThunderCrab.
 //!   * accesskit is the active a11y story; not GTK-grade today,
 //!     improving fast, sufficient for v0.
 //!
@@ -67,7 +67,7 @@ pub fn main() -> iced::Result {
         .compact()
         .init();
 
-    iced::application("Thundercrab", App::update, App::view)
+    iced::application("ThunderCrab", App::update, App::view)
         .theme(|_| Theme::Light)
         .run()
 }
@@ -142,7 +142,7 @@ impl App {
 
     fn view(&self) -> Element<'_, Message> {
         let header = column![
-            text("Thundercrab").size(32),
+            text("ThunderCrab").size(32),
             text("Local-first mail client. Rules transparent. No cloud.").size(14),
         ]
         .spacing(4);

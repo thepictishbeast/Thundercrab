@@ -19,20 +19,33 @@
 > annotation may be considered. **No commit in this repository has
 > reached `SHIP-DECISION:` status.**
 
-# Thundercrab
+# ThunderCrab
 
-A privacy-first, Rust-native mail client for the PlausiDen mail stack.
-Aims to track Thunderbird's standards/protocol coverage without inheriting
-its architecture.
+**ThunderCrab** is a privacy-first, Rust-native mail platform for the PlausiDen
+mail stack. Aims to track Thunderbird's standards/protocol coverage without
+inheriting its architecture.
 
-> Status: scaffold. Workspace compiles, schemas + safety + federated
-> ledger primitives are tested. IMAP/SMTP/ManageSieve backends are
-> stubs (`thundercrab-imap`); GUI not started.
+### Editions
+- **ThunderCrab** — the platform (and short name).
+- **ThunderCrab for Android** — ships first (Jetpack Compose over the Rust core).
+- **ThunderCrab for iOS** — Swift UI over the same core (UniFFI emits Swift).
+- **ThunderCrab Desktop** — Linux desktop, reusing the same core.
+
+One Rust core, thin native UIs over it via UniFFI (`thundercrab-ffi`). The
+lowercase `thundercrab-*` crate names are the Rust packages; **ThunderCrab** is
+the product brand.
+
+> Status: foundation. Workspace compiles; schemas + safety + federated ledger
+> primitives tested; IMAP/SMTP/ManageSieve backends are real; `thundercrab-ffi`
+> exposes the core to native UIs (account config, connect, list folders, fetch
+> headers, send, push Sieve, flag/move, rule + flag-event stores) and builds with
+> tests passing. Android/iOS/desktop UIs not yet built. Governed by AVP-2 —
+> nothing is `SHIP-DECISION:`.
 
 ## What makes this different
 
 Most mail clients have static "Promotions/Social/etc." rules that don't
-improve over time. Thundercrab has a **federated rule learning** loop:
+improve over time. ThunderCrab has a **federated rule learning** loop:
 
 1. Every time you flag or move a message, the client logs a typed
    *flag event* — features only (sender domain, header presence,
@@ -80,7 +93,7 @@ docs/
 `thundercrab_core::CrabRule` is byte-stable with
 `mail_config::CategoryRule` from `Secure-Email-Server-and-UI` modulo a
 single field: `origin`. The orchestrator emits Sieve from
-`CategoryRule`; Thundercrab edits the same logical rule via ManageSieve.
+`CategoryRule`; ThunderCrab edits the same logical rule via ManageSieve.
 The `tests/schema_compat` integration test asserts the JSON shapes match.
 
 ## Build & test

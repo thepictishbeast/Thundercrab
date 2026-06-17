@@ -12,6 +12,16 @@ description = "UniFFI binding surface over thundercrab-core/imap for native UIs 
 [lib]
 crate-type = ["lib", "cdylib", "staticlib"]
 
+# `tokio` enables UniFFI's async-export support (the async_runtime="tokio"
+# attribute on the IMAP client impl); `cli` pulls the bindgen entry point used
+# by the platform build step. `thundercrab-imap`'s `tokio` is the *runtime*
+# this crate drives the async backend on.
 [dependencies]
-uniffi = { version = "0.28" }
+uniffi = { version = "0.28", features = ["tokio", "cli"] }
 thundercrab-core = { path = "../thundercrab-core" }
+thundercrab-imap = { path = "../thundercrab-imap" }
+thundercrab-suggestions = { path = "../thundercrab-suggestions" }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }

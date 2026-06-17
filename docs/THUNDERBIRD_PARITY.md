@@ -1,7 +1,7 @@
 # Thunderbird Parity Tracker
 
 This file tracks the **standards and capabilities** Thunderbird supports
-versus what Thundercrab implements. This is the honest version of "track
+versus what ThunderCrab implements. This is the honest version of "track
 Thunderbird improvements" — Thunderbird is ~3M LOC of C++/JS that cannot
 be auto-ported to Rust. Instead we treat Thunderbird's release notes as
 a feature backlog: when they ship a new protocol or auth mechanism, we
@@ -13,7 +13,7 @@ When a Thunderbird release adds a relevant feature:
 
 1. Find the entry below or add a new row.
 2. Note the Thunderbird version and link to release notes.
-3. File an issue tagged `parity` if Thundercrab does not yet support it.
+3. File an issue tagged `parity` if ThunderCrab does not yet support it.
 
 When this repo ships support for a feature, flip ❌ → ✅ and link the PR.
 
@@ -24,7 +24,7 @@ When this repo ships support for a feature, flip ❌ → ✅ and link the PR.
 
 ## Protocols & data formats
 
-| Feature | Thunderbird | Thundercrab | Notes |
+| Feature | Thunderbird | ThunderCrab | Notes |
 |---------|-------------|-------------|-------|
 | IMAP4rev1 (RFC 3501) | ✅ | ⏳ stub (`Backend` trait only) | first concrete backend target |
 | IMAP4rev2 (RFC 9051) | ✅ partial | ⏳ stub | post-r1 |
@@ -40,7 +40,7 @@ When this repo ships support for a feature, flip ❌ → ✅ and link the PR.
 
 ## Authentication
 
-| Mechanism | Thunderbird | Thundercrab | Notes |
+| Mechanism | Thunderbird | ThunderCrab | Notes |
 |-----------|-------------|-------------|-------|
 | LOGIN / PLAIN over TLS | ✅ | ⏳ stub | trivial |
 | OAuth 2.0 (Gmail, Microsoft 365, Fastmail) | ✅ | ❌ | |
@@ -49,7 +49,7 @@ When this repo ships support for a feature, flip ❌ → ✅ and link the PR.
 
 ## Encryption
 
-| Feature | Thunderbird | Thundercrab | Notes |
+| Feature | Thunderbird | ThunderCrab | Notes |
 |---------|-------------|-------------|-------|
 | OpenPGP (RFC 4880, built-in since 78) | ✅ | ❌ | use `pgp` crate or shell to gnupg |
 | S/MIME | ✅ | ❌ | |
@@ -57,7 +57,7 @@ When this repo ships support for a feature, flip ❌ → ✅ and link the PR.
 
 ## UX / app-level
 
-| Feature | Thunderbird | Thundercrab | Notes |
+| Feature | Thunderbird | ThunderCrab | Notes |
 |---------|-------------|-------------|-------|
 | Threaded conversation view | ✅ | ❌ (no GUI yet) | needs References/In-Reply-To threading |
 | Server-side search (IMAP SEARCH) | ✅ | ❌ | |
@@ -65,10 +65,10 @@ When this repo ships support for a feature, flip ❌ → ✅ and link the PR.
 | Address book (CardDAV) | ✅ | ❌ | |
 | Calendar (CalDAV / iCalendar) | ✅ | ❌ | possibly out of scope |
 | Filters / message rules editor UI | ✅ | ⏳ schema in `thundercrab-core` | UI lives in future GUI crate |
-| **Federated rule learning** | ❌ | ✅ schema + safety + ledger primitives | Thundercrab differentiator |
+| **Federated rule learning** | ❌ | ✅ schema + safety + ledger primitives | ThunderCrab differentiator |
 | **"Why is this here?" audit explainer** | ❌ | ⏳ design only | reads `X-PlausiDen-Category` and re-runs `evaluate` |
 
-## Things Thundercrab will deliberately NOT match
+## Things ThunderCrab will deliberately NOT match
 
 - Bundled Lightning calendar with full sync — out of scope.
 - Built-in chat (XMPP/IRC/Matrix) — Thunderbird ships this; we won't.

@@ -58,7 +58,7 @@ pub type DbResult<T> = Result<T, DbError>;
 /// Current schema version.
 const SCHEMA_VERSION: i64 = 1;
 
-/// SQLite handle for Thundercrab's local store.
+/// SQLite handle for ThunderCrab's local store.
 pub struct Db {
     conn: Connection,
 }

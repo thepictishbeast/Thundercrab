@@ -3,7 +3,7 @@
 //! **Wire-compatible** with `mail_config::CategoryRule` from the
 //! Secure-Email-Server-and-UI repo. Identical serde tags, identical AST.
 //! When the orchestrator emits a Sieve script from `CategoryRule` and
-//! Thundercrab edits the same rule via ManageSieve, the JSON
+//! ThunderCrab edits the same rule via ManageSieve, the JSON
 //! representation must be byte-stable across the two crates.
 //!
 //! BUG ASSUMPTION: If `mail_config::CategoryRule` adds a variant,

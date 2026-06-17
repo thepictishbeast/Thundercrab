@@ -161,7 +161,7 @@ pub fn verify(signed: &SignedSuggestion) -> Result<&Suggestion, LedgerError> {
 
 /// Canonical JSON encoding — sorted keys, compact, UTF-8. Used as the
 /// signing input AND as the input to `pattern_hash`. Must be byte-stable
-/// across Thundercrab versions; keep this function free of incidental
+/// across ThunderCrab versions; keep this function free of incidental
 /// changes.
 fn canonical_json_bytes<T: Serialize>(value: &T) -> Vec<u8> {
     // serde_json with `BTreeMap` semantics on the way out; we accomplish

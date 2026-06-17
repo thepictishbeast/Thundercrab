@@ -3,7 +3,7 @@
 //! `ManageSieve` is a small, line-oriented protocol that runs on port
 //! 4190 with a STARTTLS upgrade. It's the standardized mechanism for
 //! a mail client to install or replace the user's server-side
-//! filtering rules. Thundercrab uses it as the persistence path for
+//! filtering rules. ThunderCrab uses it as the persistence path for
 //! the typed `CrabRule` chain — generate Sieve, push it, set it active,
 //! the server applies the rules to incoming mail.
 //!
@@ -29,7 +29,7 @@
 //! * Only SASL PLAIN is supported. Most `ManageSieve` servers also
 //!   accept LOGIN; the difference doesn't matter once you're inside
 //!   TLS, but if a server refuses PLAIN we surface that as Auth.
-//! * No script-listing, no GETSCRIPT, no DELETESCRIPT. Thundercrab's
+//! * No script-listing, no GETSCRIPT, no DELETESCRIPT. ThunderCrab's
 //!   model is single-script (the typed `CrabRule` chain owns the whole
 //!   filter); we PUT-and-SETACTIVE in one call, never read back.
 //! * No HAVESPACE preflight. Servers that reject oversize scripts
@@ -50,7 +50,7 @@ use crate::{AccountConfig, BackendError};
 ///
 /// `script_name` is the server-side identifier (e.g., `"thundercrab"`).
 /// `script` is the Sieve source. Empty `script` is permitted by
-/// the protocol but Thundercrab callers should pass a non-empty
+/// the protocol but ThunderCrab callers should pass a non-empty
 /// string — clearing rules is a separate, deliberate operation.
 ///
 /// # Errors

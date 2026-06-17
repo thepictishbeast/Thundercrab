@@ -1,4 +1,4 @@
-//! `crab` — Thundercrab command-line front-end.
+//! `crab` — ThunderCrab command-line front-end.
 //!
 //! Exercises the IMAP, ManageSieve, and SMTP modules end-to-end
 //! against a real account. Useful as:
@@ -6,7 +6,7 @@
 //!     dependency upgrades to confirm the protocol still works).
 //!   * A bridge before the GUI lands — power users can manage rules
 //!     and sample mail today, without waiting for toolkit selection.
-//!   * A reference example for embedding Thundercrab in scripts.
+//!   * A reference example for embedding ThunderCrab in scripts.
 //!
 //! Credentials come from environment variables — never from
 //! flags — so passwords don't land in shell history:
@@ -35,7 +35,7 @@ use thundercrab_imap::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "crab", about = "Thundercrab CLI — list/fetch/send/push-sieve")]
+#[command(name = "crab", about = "ThunderCrab CLI — list/fetch/send/push-sieve")]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,

@@ -1,8 +1,8 @@
-# Thundercrab Architecture
+# ThunderCrab Architecture
 
 ## One-paragraph summary
 
-Thundercrab is a Rust mail client whose differentiator is *learned*
+ThunderCrab is a Rust mail client whose differentiator is *learned*
 sorting that improves both locally and federated-ly without ever
 seeing message content. The same `CrabRule` AST is what the
 orchestrator compiles to Sieve server-side, what the client evaluates

@@ -1,4 +1,4 @@
-//! `crab-ledger` — public, append-only ledger for Thundercrab's
+//! `crab-ledger` — public, append-only ledger for ThunderCrab's
 //! federated rule learning.
 //!
 //! Operators (PlausiDen runs one; anyone can run their own) host this
