@@ -6,3 +6,7 @@ Cargo.lock
 
 # never commit a real signing key
 *.thundercrab-key
+
+# UniFFI bindings are regenerated from the cdylib by the platform build;
+# they are build artifacts, not source.
+/thundercrab-ffi/bindings/
