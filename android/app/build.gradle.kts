@@ -109,6 +109,12 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // On-device (instrumented) test: proves the Rust .so loads + executes through
+    // JNA on a real Android runtime — the one thing compile/sign cannot verify.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.1")
 }
 
 // ---------------------------------------------------------------------------
