@@ -43,46 +43,46 @@ uniffi::setup_scaffolding!();
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum FfiError {
     /// Network or TLS transport failure.
-    #[error("transport: {message}")]
+    #[error("transport: {detail}")]
     Transport {
         /// Human-readable detail.
-        message: String,
+        detail: String,
     },
     /// Authentication or authorization failure.
-    #[error("auth: {message}")]
+    #[error("auth: {detail}")]
     Auth {
         /// Human-readable detail.
-        message: String,
+        detail: String,
     },
     /// Server returned a protocol-level error, or a JSON/store error occurred.
-    #[error("protocol: {message}")]
+    #[error("protocol: {detail}")]
     Protocol {
         /// Human-readable detail.
-        message: String,
+        detail: String,
     },
     /// The requested operation is not implemented in this build.
-    #[error("not implemented: {message}")]
+    #[error("not implemented: {detail}")]
     NotImplemented {
         /// Human-readable detail.
-        message: String,
+        detail: String,
     },
     /// A value handed across the FFI seam was malformed (bad JSON, wrong-length
     /// hash, unparseable address, etc.).
-    #[error("invalid input: {message}")]
+    #[error("invalid input: {detail}")]
     InvalidInput {
         /// Human-readable detail.
-        message: String,
+        detail: String,
     },
 }
 
 impl From<BackendError> for FfiError {
     fn from(e: BackendError) -> Self {
         match e {
-            BackendError::Transport(m) => Self::Transport { message: m },
-            BackendError::Auth(m) => Self::Auth { message: m },
-            BackendError::Protocol(m) => Self::Protocol { message: m },
+            BackendError::Transport(m) => Self::Transport { detail: m },
+            BackendError::Auth(m) => Self::Auth { detail: m },
+            BackendError::Protocol(m) => Self::Protocol { detail: m },
             BackendError::NotImplemented(m) => Self::NotImplemented {
-                message: m.to_string(),
+                detail: m.to_string(),
             },
         }
     }
@@ -93,7 +93,7 @@ impl From<thundercrab_core::DbError> for FfiError {
         // The store's failure modes are all "the backing protocol said no";
         // they map onto Protocol so the UI's catch-all handles them.
         Self::Protocol {
-            message: e.to_string(),
+            detail: e.to_string(),
         }
     }
 }
@@ -101,7 +101,7 @@ impl From<thundercrab_core::DbError> for FfiError {
 impl From<thundercrab_suggestions::SafetyError> for FfiError {
     fn from(e: thundercrab_suggestions::SafetyError) -> Self {
         Self::InvalidInput {
-            message: e.to_string(),
+            detail: e.to_string(),
         }
     }
 }
@@ -325,7 +325,7 @@ impl TryFrom<&FfiFlagEvent> for FlagEvent {
             .as_slice()
             .try_into()
             .map_err(|_| FfiError::InvalidInput {
-                message: format!(
+                detail: format!(
                     "message_hash must be exactly 32 bytes, got {}",
                     e.message_hash.len()
                 ),
@@ -333,7 +333,7 @@ impl TryFrom<&FfiFlagEvent> for FlagEvent {
         let observed_at: DateTime<Utc> =
             Utc.timestamp_opt(e.observed_at, 0).single().ok_or_else(|| {
                 FfiError::InvalidInput {
-                    message: format!("observed_at is not a valid epoch second: {}", e.observed_at),
+                    detail: format!("observed_at is not a valid epoch second: {}", e.observed_at),
                 }
             })?;
         Ok(Self {
@@ -415,11 +415,11 @@ impl TryFrom<&FfiCrabRule> for CrabRule {
     fn try_from(r: &FfiCrabRule) -> Result<Self, Self::Error> {
         let when: MatchExpr =
             serde_json::from_str(&r.when_json).map_err(|e| FfiError::InvalidInput {
-                message: format!("when_json: {e}"),
+                detail: format!("when_json: {e}"),
             })?;
         let action: Action =
             serde_json::from_str(&r.action_json).map_err(|e| FfiError::InvalidInput {
-                message: format!("action_json: {e}"),
+                detail: format!("action_json: {e}"),
             })?;
         Ok(Self {
             id: r.id.clone(),
@@ -438,10 +438,10 @@ impl TryFrom<&CrabRule> for FfiCrabRule {
 
     fn try_from(r: &CrabRule) -> Result<Self, Self::Error> {
         let when_json = serde_json::to_string(&r.when).map_err(|e| FfiError::Protocol {
-            message: format!("serialize when: {e}"),
+            detail: format!("serialize when: {e}"),
         })?;
         let action_json = serde_json::to_string(&r.action).map_err(|e| FfiError::Protocol {
-            message: format!("serialize action: {e}"),
+            detail: format!("serialize action: {e}"),
         })?;
         Ok(Self {
             id: r.id.clone(),
@@ -731,7 +731,7 @@ impl ThunderCrabClient {
     #[allow(clippy::unused_async)] // signature parity with the future real impl
     pub async fn fetch_body(&self, _folder: String, _uid: u32) -> Result<String, FfiError> {
         Err(FfiError::NotImplemented {
-            message: "fetch_body: reading message bodies is gated and unimplemented".to_string(),
+            detail: "fetch_body: reading message bodies is gated and unimplemented".to_string(),
         })
     }
 
@@ -753,7 +753,7 @@ impl ThunderCrabClient {
 /// backend was already taken by `logout`.
 fn client_gone() -> FfiError {
     FfiError::NotImplemented {
-        message: "client has been logged out".to_string(),
+        detail: "client has been logged out".to_string(),
     }
 }
 

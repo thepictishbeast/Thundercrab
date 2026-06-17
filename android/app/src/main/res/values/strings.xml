@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ThunderCrab</string>
+
+    <!-- Account Setup screen -->
+    <string name="setup_title">Account Setup</string>
+    <string name="setup_email_label">Email</string>
+    <string name="setup_password_label">Password</string>
+    <string name="setup_imap_host_label">IMAP host</string>
+    <string name="setup_imap_port_label">IMAP port</string>
+    <string name="setup_smtp_host_label">SMTP host</string>
+    <string name="setup_smtp_port_label">SMTP port</string>
+    <string name="setup_sieve_port_label">Sieve port</string>
+    <string name="setup_connect">Connect</string>
+    <string name="setup_connecting">Connecting…</string>
+
+    <!-- Folder List screen -->
+    <string name="folders_title">Folders</string>
+    <string name="folders_loading">Loading folders…</string>
+    <string name="folders_empty">No folders.</string>
+    <string name="folders_retry">Retry</string>
+
+    <!-- Message List screen -->
+    <string name="messages_loading">Loading messages…</string>
+    <string name="messages_empty">No messages.</string>
+    <string name="messages_retry">Retry</string>
+    <string name="messages_toggle_seen">Toggle read</string>
+    <string name="messages_toggle_flagged">Toggle flag</string>
+    <string name="messages_move">Move</string>
+    <string name="messages_no_subject">(no subject)</string>
+    <string name="messages_no_sender">(no sender)</string>
+
+    <!-- Message Read screen -->
+    <string name="read_title">Message</string>
+    <string name="read_from_label">From</string>
+    <string name="read_subject_label">Subject</string>
+    <string name="read_headers_label">Headers</string>
+    <string name="read_not_found">Message not available.</string>
+
+    <!-- Disabled body card (no-body invariant) -->
+    <string name="read_body_disabled">Message body not available in this build.</string>
+
+    <!-- Generic / navigation -->
+    <string name="nav_back">Back</string>
+</resources>

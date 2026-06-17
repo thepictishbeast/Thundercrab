@@ -1,0 +1,290 @@
+// ============================================================================
+// feature/messages/MessageListScreen.kt  (UI group)
+// Screen 3 — Message List. HEADER-ONLY rows (from, subject). Tap a row → read.
+// An overflow menu per row offers flag/seen toggles and move-to-folder; each
+// of those calls the VM (onToggleSeen / onToggleFlagged / onMove), which is
+// exactly where the Repository emits a features-only FlagEvent internally.
+//
+// MessageHeader carries no flag state, so the menu offers explicit set/clear
+// actions rather than reflecting a current toggle. Move target is typed into a
+// dialog — folder names are never hardcoded. AVP-2: UNVERIFIED.
+// ============================================================================
+package com.plausiden.thundercrab.feature.messages
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.plausiden.thundercrab.data.model.MessageHeader
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MessageListScreen(
+    viewModel: MessageListViewModel,
+    onBack: () -> Unit,
+    onMessageClick: (Int) -> Unit,
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Dialog state for the "move" action (typed destination folder).
+    var moveTargetUid by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(state.errorMessage) {
+        val msg = state.errorMessage
+        if (msg != null) {
+            val kind = state.errorKind?.name ?: "ERROR"
+            snackbarHostState.showSnackbar("$kind: $msg")
+            viewModel.consumeError()
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(state.folder) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            when {
+                state.loading -> {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
+
+                state.messages.isEmpty() -> {
+                    EmptyOrError(
+                        errorMessage = state.errorMessage,
+                        onRetry = viewModel::refresh,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+
+                else -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(items = state.messages, key = { it.uid }) { header ->
+                            MessageRow(
+                                header = header,
+                                onClick = { onMessageClick(header.uid) },
+                                onMarkSeen = { viewModel.onToggleSeen(header.uid, true) },
+                                onMarkUnseen = { viewModel.onToggleSeen(header.uid, false) },
+                                onFlag = { viewModel.onToggleFlagged(header.uid, true) },
+                                onUnflag = { viewModel.onToggleFlagged(header.uid, false) },
+                                onMove = { moveTargetUid = header.uid },
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val targetUid = moveTargetUid
+    if (targetUid != null) {
+        MoveDialog(
+            onDismiss = { moveTargetUid = null },
+            onConfirm = { destination ->
+                viewModel.onMove(targetUid, destination)
+                moveTargetUid = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun MessageRow(
+    header: MessageHeader,
+    onClick: () -> Unit,
+    onMarkSeen: () -> Unit,
+    onMarkUnseen: () -> Unit,
+    onFlag: () -> Unit,
+    onUnflag: () -> Unit,
+    onMove: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 20.dp, end = 4.dp, top = 14.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = header.from.ifBlank { "(unknown sender)" },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = header.subject.ifBlank { "(no subject)" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box {
+            IconButton(onClick = { menuExpanded = true }) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "Message actions",
+                )
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Mark as read") },
+                    onClick = { menuExpanded = false; onMarkSeen() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Mark as unread") },
+                    onClick = { menuExpanded = false; onMarkUnseen() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Flag") },
+                    onClick = { menuExpanded = false; onFlag() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Unflag") },
+                    onClick = { menuExpanded = false; onUnflag() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Move to…") },
+                    onClick = { menuExpanded = false; onMove() },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoveDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var destination by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Move message") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Enter the destination mailbox name.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = destination,
+                    onValueChange = { destination = it },
+                    label = { Text("Mailbox") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(destination.trim()) },
+                enabled = destination.isNotBlank(),
+            ) { Text("Move") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun EmptyOrError(
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (errorMessage != null) {
+            Text(
+                text = "Couldn't load messages",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = errorMessage,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                text = "No messages in this mailbox.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Button(onClick = onRetry) { Text("Refresh") }
+    }
+}

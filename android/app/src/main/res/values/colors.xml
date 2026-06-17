@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Resource colors are intentionally minimal. The live app palette is owned by
+      the Compose theme (ui/theme/Color.kt + Theme.kt), per build spec §3:
+      AMOLED true-black (#000000) dark default. These values exist only to back
+      the launch/splash window so the cold-start window matches the AMOLED dark
+      surface and avoids a white flash before Compose draws.
+    -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <!-- Launcher background lives in ic_launcher_background.xml (separate file per build plan). -->
+</resources>

@@ -1,0 +1,20 @@
+# ThunderCrab Android — .gitignore (BUILD group). AVP-2: UNVERIFIED — UNSAFE.
+
+# Gradle
+.gradle/
+/build/
+/app/build/
+
+# UniFFI build artifacts (NOT owned source):
+#  - per-ABI native libs produced by cargo-ndk
+#  - generated Kotlin bindings produced by uniffi-bindgen
+/app/src/main/jniLibs/
+/app/build/generated/source/uniffi/
+
+# Local environment (machine-specific SDK/NDK paths)
+local.properties
+
+# IDE
+*.iml
+.idea/
+.DS_Store

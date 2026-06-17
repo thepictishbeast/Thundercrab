@@ -1,0 +1,24 @@
+# ThunderCrab Android — local.properties template (BUILD group).
+# AVP-2: UNVERIFIED — UNSAFE.
+#
+# Copy this file to `local.properties` (which is git-ignored) and set the paths
+# for YOUR dev machine. local.properties is machine-specific and must NOT be
+# committed.
+#
+# Required: the Android SDK location.
+sdk.dir=/path/to/Android/Sdk
+
+# NDK note:
+#   The NDK version is PINNED to 26.3.11579264 in app/build.gradle.kts
+#   (android.ndkVersion). Install exactly that revision via the SDK Manager:
+#       sdkmanager "ndk;26.3.11579264"
+#   You do NOT need an ndk.dir line — AGP resolves the pinned ndkVersion from
+#   $sdk.dir/ndk/26.3.11579264, and the UniFFI Exec tasks read that path from
+#   android.ndkDirectory. Only set ndk.dir if your NDK lives outside the SDK:
+# ndk.dir=/path/to/android-ndk-r26d
+#
+# The cargo-ndk build step also needs `cargo` and `cargo-ndk` on PATH and the
+# Android Rust targets installed:
+#   rustup target add aarch64-linux-android armv7-linux-androideabi \
+#                     x86_64-linux-android i686-linux-android
+#   cargo install cargo-ndk

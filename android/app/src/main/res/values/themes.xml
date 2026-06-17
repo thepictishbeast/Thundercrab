@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Activity/launch theme. The real UI palette is owned by the Compose theme
+      (ThundercrabTheme in ui/theme/Theme.kt) per build spec §3. This XML theme
+      only governs the pre-Compose launch window: a no-action-bar Material3 base
+      with an AMOLED true-black window background so the cold-start window matches
+      the dark default and avoids a white flash before the first Compose frame.
+    -->
+    <style name="Theme.Thundercrab" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/black</item>
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:navigationBarColor">@color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
