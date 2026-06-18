@@ -30,7 +30,7 @@
 //!     from key reordering.
 
 use chrono::Utc;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -151,7 +151,10 @@ pub fn verify(signed: &SignedSuggestion) -> Result<&Suggestion, LedgerError> {
     let pk = VerifyingKey::from_bytes(&signed.public_key).map_err(|_| LedgerError::BadKey)?;
     let body = canonical_json_bytes(&signed.suggestion);
     let sig = Signature::from_bytes(&signed.signature);
-    pk.verify(&body, &sig).map_err(|_| LedgerError::BadSignature)?;
+    // verify_strict (not verify): reject signature malleability and small-order /
+    // non-canonical public keys. Corroboration trust counts on these signatures,
+    // so use dalek's stricter check (its recommendation for trust-bearing verify).
+    pk.verify_strict(&body, &sig).map_err(|_| LedgerError::BadSignature)?;
     let recomputed: [u8; 32] = *blake3::hash(&canonical_json_bytes(&signed.suggestion.rule)).as_bytes();
     if recomputed != signed.suggestion.pattern_hash {
         return Err(LedgerError::HashMismatch);
