@@ -560,9 +560,12 @@ pub fn preview_suggestions(
         let candidates = derive_rule_candidates(&counts, min_obs, dominance);
         let mut out = Vec::with_capacity(candidates.len());
         for cand in &candidates {
-            // apply_suggestion both validates (fail-closed on protected
-            // folders/flags) and re-marks origin=Federated + clamps score.
-            let safe = apply_suggestion(&cand.rule)?;
+            // apply_suggestion validates (fail-closed on protected folders/flags)
+            // and re-marks origin=Federated + clamps score. A candidate that FAILS
+            // the gate is SKIPPED — preview returns only those that pass, and never
+            // errors the whole batch over a single unsafe candidate (its doc
+            // contract). A real serialization failure on a *safe* rule still errors.
+            let Ok(safe) = apply_suggestion(&cand.rule) else { continue };
             out.push(FfiCrabRule::try_from(&safe)?);
         }
         Ok(out)
@@ -961,6 +964,44 @@ mod tests {
         // Safety gate re-marks origin=Federated.
         assert!(matches!(suggestions[0].origin, FfiRuleOrigin::Federated));
         assert!(suggestions[0].when_json.contains("@clear.com"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn preview_suggestions_skips_unsafe_candidates_without_erroring() {
+        // Regression: a derived candidate that fails the safety gate (e.g.
+        // file-into-INBOX, a protected folder) must be SKIPPED — not error the
+        // whole preview. Before the fix, apply_suggestion(..)? aborted the batch.
+        let path = std::env::temp_dir().join(format!("tc_ffi_sugg_skip_{}.db", std::process::id()));
+        let path_str = path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&path);
+
+        // Safe signal: @clear.com → Promotions (passes the gate).
+        for h in 0..4u8 {
+            record_flag_event(path_str.clone(), FfiFlagEvent {
+                message_hash: vec![h; 32], source: FfiFlagSource::ManualMove,
+                destination: "Promotions".into(), from_domain_with_at: "@clear.com".into(),
+                list_id: None, has_list_unsubscribe: false, subject_tokens: vec![],
+                priority_high: false, observed_at: 1_700_000_000,
+            }).expect("record safe");
+        }
+        // Unsafe signal: @spam.com → INBOX (protected folder; gate rejects it).
+        for h in 10..14u8 {
+            record_flag_event(path_str.clone(), FfiFlagEvent {
+                message_hash: vec![h; 32], source: FfiFlagSource::ManualMove,
+                destination: "INBOX".into(), from_domain_with_at: "@spam.com".into(),
+                list_id: None, has_list_unsubscribe: false, subject_tokens: vec![],
+                priority_high: false, observed_at: 1_700_000_000,
+            }).expect("record unsafe");
+        }
+
+        // Must NOT error, and returns only the gate-passing candidate.
+        let suggestions = preview_suggestions(path_str.clone(), 3, 0.7)
+            .expect("preview must not error on an unsafe candidate");
+        assert_eq!(suggestions.len(), 1, "only the gate-passing candidate should survive");
+        assert!(suggestions[0].when_json.contains("@clear.com"));
+        assert!(suggestions.iter().all(|s| !s.action_json.contains("INBOX")));
 
         let _ = std::fs::remove_file(&path);
     }
