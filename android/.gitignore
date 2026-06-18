@@ -4,6 +4,8 @@
 .gradle/
 /build/
 /app/build/
+# Kotlin 2.0 build-session dir (artifacts, not source)
+.kotlin/
 
 # UniFFI build artifacts (NOT owned source):
 #  - per-ABI native libs produced by cargo-ndk
