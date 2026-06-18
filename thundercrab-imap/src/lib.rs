@@ -17,6 +17,9 @@
 pub mod managesieve;
 pub mod rust_imap;
 pub mod smtp;
+pub mod tls;
+
+pub use tls::CryptoMode;
 
 use std::future::Future;
 use thiserror::Error;
@@ -93,6 +96,10 @@ pub struct AccountConfig {
     pub sieve_port: u16,
     /// Username (full email address).
     pub username: String,
+    /// Post-quantum key-exchange posture for every TLS connection this
+    /// account makes (IMAPS / `ManageSieve` / SMTP). Defaults to
+    /// [`CryptoMode::PqHybrid`].
+    pub crypto_mode: CryptoMode,
 }
 
 impl AccountConfig {
@@ -108,6 +115,7 @@ impl AccountConfig {
             smtp_port: 587,
             sieve_port: 4190,
             username: username.into(),
+            crypto_mode: CryptoMode::default(),
         }
     }
 }

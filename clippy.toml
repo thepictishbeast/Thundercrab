@@ -1,0 +1,4 @@
+# Proper nouns / product names that are not code items. Without this,
+# `clippy::doc_markdown` flags them as needing backticks throughout the docs.
+# `..` extends clippy's built-in default ident list rather than replacing it.
+doc-valid-idents = ["ThunderCrab", "PlausiDen", "ManageSieve", "UniFFI", "AMOLED", "ML-KEM", ".."]

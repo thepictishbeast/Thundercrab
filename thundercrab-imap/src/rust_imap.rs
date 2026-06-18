@@ -36,7 +36,6 @@ use std::sync::Arc;
 
 use async_imap::Session;
 use futures::{StreamExt as _, pin_mut};
-use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::ServerName;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
@@ -52,18 +51,6 @@ pub struct RustImapBackend {
     /// `async_imap::Session` API takes `&mut self` on every method
     /// and we expose the trait through `&self`.
     session: Mutex<Session<TlsStream<TcpStream>>>,
-}
-
-/// Build the rustls config with Mozilla's webpki roots.
-///
-/// BUG ASSUMPTION: `webpki_roots::TLS_SERVER_ROOTS` is well-formed at
-/// compile time; `add_trust_anchors` cannot fail with this input.
-fn tls_config() -> ClientConfig {
-    let mut roots = RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth()
 }
 
 impl RustImapBackend {
@@ -85,7 +72,8 @@ impl RustImapBackend {
         let port = config.imap_port;
         let tcp = crate::connect_with_timeout(host, port, crate::CONNECT_TIMEOUT).await?;
 
-        let connector = TlsConnector::from(Arc::new(tls_config()));
+        let connector =
+            TlsConnector::from(Arc::new(crate::tls::client_config(config.crypto_mode)));
         let server_name = ServerName::try_from(host.to_string())
             .map_err(|e| BackendError::Transport(format!("server name: {e}")))?;
         let tls = connector

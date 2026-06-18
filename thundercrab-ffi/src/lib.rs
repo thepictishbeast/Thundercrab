@@ -29,7 +29,7 @@ use thundercrab_core::{
 };
 use thundercrab_imap::rust_imap::RustImapBackend;
 use thundercrab_imap::smtp::{self, OutboundMessage, SmtpEncryption};
-use thundercrab_imap::{AccountConfig, Backend as _, BackendError, managesieve};
+use thundercrab_imap::{AccountConfig, Backend as _, BackendError, CryptoMode, managesieve};
 use thundercrab_suggestions::{apply_suggestion, derive_rule_candidates};
 use tokio::sync::Mutex;
 
@@ -264,6 +264,39 @@ pub fn thundercrab_version() -> String {
 // Account config
 // =============================================================================
 
+/// Post-quantum key-exchange posture, surfaced to the UI's security settings.
+/// Mirrors [`thundercrab_imap::CryptoMode`].
+#[derive(uniffi::Enum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FfiCryptoMode {
+    /// Post-quantum hybrid preferred, classical fallback (recommended default).
+    #[default]
+    PqHybrid,
+    /// Classical key exchange only (maximum compatibility).
+    ClassicalOnly,
+    /// Require a post-quantum hybrid group — fail rather than fall back.
+    PqRequired,
+}
+
+impl From<FfiCryptoMode> for CryptoMode {
+    fn from(m: FfiCryptoMode) -> Self {
+        match m {
+            FfiCryptoMode::PqHybrid => Self::PqHybrid,
+            FfiCryptoMode::ClassicalOnly => Self::ClassicalOnly,
+            FfiCryptoMode::PqRequired => Self::PqRequired,
+        }
+    }
+}
+
+impl From<CryptoMode> for FfiCryptoMode {
+    fn from(m: CryptoMode) -> Self {
+        match m {
+            CryptoMode::PqHybrid => Self::PqHybrid,
+            CryptoMode::ClassicalOnly => Self::ClassicalOnly,
+            CryptoMode::PqRequired => Self::PqRequired,
+        }
+    }
+}
+
 /// Connection settings a mail app needs, mirroring the canonical
 /// [`thundercrab_imap::AccountConfig`] field-for-field. Returned to the
 /// platform UI so the account-setup screen can be pre-filled instead of asking
@@ -282,6 +315,8 @@ pub struct FfiAccountConfig {
     pub sieve_port: u16,
     /// Username (full email address).
     pub username: String,
+    /// Post-quantum key-exchange posture for this account's TLS connections.
+    pub crypto_mode: FfiCryptoMode,
 }
 
 impl From<AccountConfig> for FfiAccountConfig {
@@ -293,6 +328,7 @@ impl From<AccountConfig> for FfiAccountConfig {
             smtp_port: c.smtp_port,
             sieve_port: c.sieve_port,
             username: c.username,
+            crypto_mode: c.crypto_mode.into(),
         }
     }
 }
@@ -306,6 +342,7 @@ impl From<&FfiAccountConfig> for AccountConfig {
             smtp_port: c.smtp_port,
             sieve_port: c.sieve_port,
             username: c.username.clone(),
+            crypto_mode: c.crypto_mode.into(),
         }
     }
 }

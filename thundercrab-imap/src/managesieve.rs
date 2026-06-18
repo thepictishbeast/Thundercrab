@@ -37,7 +37,6 @@
 
 use std::sync::Arc;
 
-use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::ServerName;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio_rustls::TlsConnector;
@@ -81,7 +80,7 @@ pub async fn put_active_script(
     read_until_ok(&mut stream).await?;
     let tcp = stream.into_inner();
 
-    let connector = TlsConnector::from(Arc::new(tls_config()));
+    let connector = TlsConnector::from(Arc::new(crate::tls::client_config(cfg.crypto_mode)));
     let server_name = ServerName::try_from(host.to_string())
         .map_err(|e| BackendError::Transport(format!("server name: {e}")))?;
     let tls = connector
@@ -161,17 +160,6 @@ pub async fn put_active_script(
     // Best-effort logout; we already have what we wanted.
     let _ = tls.get_mut().write_all(b"LOGOUT\r\n").await;
     Ok(())
-}
-
-/// Build the rustls config used for the STARTTLS upgrade. Same
-/// posture as the IMAP backend: ring provider + Mozilla roots, no
-/// client auth, no insecure fallbacks.
-fn tls_config() -> ClientConfig {
-    let mut roots = RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth()
 }
 
 #[derive(Debug)]

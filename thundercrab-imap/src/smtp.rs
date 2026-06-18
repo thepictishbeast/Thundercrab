@@ -75,6 +75,12 @@ pub async fn send_message(
     encryption: SmtpEncryption,
     message: &OutboundMessage<'_>,
 ) -> Result<(), BackendError> {
+    // lettre builds its own rustls ClientConfig internally via the no-provider
+    // `builder()`. Since both `ring` (lettre) and `aws-lc-rs` (us) are compiled
+    // in, that call needs a process-default provider installed first — and this
+    // also gives the SMTP path the same PQ-capable provider as IMAP/Sieve.
+    crate::tls::ensure_provider();
+
     let mut builder = Message::builder()
         .from(parse_mailbox(message.from)?)
         .subject(message.subject);
