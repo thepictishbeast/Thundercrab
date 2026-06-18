@@ -33,6 +33,14 @@ use tokio::sync::Mutex;
 
 uniffi::setup_scaffolding!();
 
+/// Overall wall-clock bound for a cold-flow network operation (TCP connect +
+/// TLS handshake + auth + protocol reads). thundercrab-imap bounds the TCP
+/// connect itself; this caps the WHOLE flow so a server that completes the TCP
+/// connect and then STALLS mid-handshake/auth can't hang the mobile UI. SMTP is
+/// already bounded by lettre's own timeout, so only IMAP connect + ManageSieve
+/// push need this wrapper.
+const OP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 // =============================================================================
 // Errors
 // =============================================================================
@@ -620,7 +628,12 @@ pub async fn push_sieve(
     script: String,
 ) -> Result<(), FfiError> {
     let account = AccountConfig::from(&cfg);
-    managesieve::put_active_script(&account, &password, &script_name, &script).await?;
+    tokio::time::timeout(
+        OP_TIMEOUT,
+        managesieve::put_active_script(&account, &password, &script_name, &script),
+    )
+    .await
+    .map_err(|_| FfiError::Transport { detail: "push_sieve timed out".to_string() })??;
     Ok(())
 }
 
@@ -650,7 +663,9 @@ pub async fn connect(
     password: String,
 ) -> Result<Arc<ThunderCrabClient>, FfiError> {
     let account = AccountConfig::from(&cfg);
-    let backend = RustImapBackend::connect(&account, &password).await?;
+    let backend = tokio::time::timeout(OP_TIMEOUT, RustImapBackend::connect(&account, &password))
+        .await
+        .map_err(|_| FfiError::Transport { detail: "connect timed out".to_string() })??;
     Ok(Arc::new(ThunderCrabClient {
         inner: Mutex::new(Some(backend)),
     }))
