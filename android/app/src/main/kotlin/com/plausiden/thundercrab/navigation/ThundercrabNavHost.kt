@@ -25,6 +25,8 @@ import com.plausiden.thundercrab.feature.read.MessageReadScreen
 import com.plausiden.thundercrab.feature.read.MessageReadViewModel
 import com.plausiden.thundercrab.feature.setup.AccountSetupScreen
 import com.plausiden.thundercrab.feature.setup.AccountSetupViewModel
+import com.plausiden.thundercrab.feature.suggestions.SuggestionsScreen
+import com.plausiden.thundercrab.feature.suggestions.SuggestionsViewModel
 
 @Composable
 fun ThundercrabNavHost() {
@@ -61,6 +63,19 @@ fun ThundercrabNavHost() {
                 onFolderClick = { folderName ->
                     navController.navigate(Destinations.messages(folderName))
                 },
+                onOpenSuggestions = {
+                    navController.navigate(Destinations.SUGGESTIONS)
+                },
+            )
+        }
+
+        // 2b. Suggestions ------------------------------------------------------
+        composable(Destinations.SUGGESTIONS) {
+            val vm: SuggestionsViewModel =
+                viewModel(factory = SuggestionsViewModel.factory(repository))
+            SuggestionsScreen(
+                viewModel = vm,
+                onBack = { navController.popBackStack() },
             )
         }
 

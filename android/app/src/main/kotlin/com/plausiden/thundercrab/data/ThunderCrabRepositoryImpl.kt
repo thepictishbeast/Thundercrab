@@ -12,22 +12,31 @@ import com.plausiden.thundercrab.data.model.ConnectResult
 import com.plausiden.thundercrab.data.model.ErrorKind
 import com.plausiden.thundercrab.data.model.Folder
 import com.plausiden.thundercrab.data.model.MessageHeader
+import com.plausiden.thundercrab.data.model.RuleSuggestion
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 // The ONE import block of the generated surface, isolated to this file:
 import uniffi.thundercrab_ffi.FfiAccountConfig
+import uniffi.thundercrab_ffi.FfiCrabRule
 import uniffi.thundercrab_ffi.FfiException
 import uniffi.thundercrab_ffi.FfiFlagEvent
 import uniffi.thundercrab_ffi.FfiFlagSource
 import uniffi.thundercrab_ffi.FfiHeaders
 import uniffi.thundercrab_ffi.FfiFolder
+import uniffi.thundercrab_ffi.FfiRuleOrigin
 import uniffi.thundercrab_ffi.ThunderCrabClient
 import uniffi.thundercrab_ffi.connect as ffiConnect
+import uniffi.thundercrab_ffi.deleteRule as ffiDeleteRule
+import uniffi.thundercrab_ffi.loadRules as ffiLoadRules
 import uniffi.thundercrab_ffi.plausidenAccountConfig
+import uniffi.thundercrab_ffi.previewSuggestions as ffiPreviewSuggestions
 import uniffi.thundercrab_ffi.recordFlagEvent
+import uniffi.thundercrab_ffi.rulesToSieve as ffiRulesToSieve
+import uniffi.thundercrab_ffi.saveRule as ffiSaveRule
 
 /**
  * @param dbPath absolute SQLite path, injected by AppContainer
@@ -48,6 +57,11 @@ class ThunderCrabRepositoryImpl(
     private var client: ThunderCrabClient? = null
     // Per-folder header cache feeding MessageRead (no-body invariant, spec §5.1/§2).
     private val headerCache = mutableMapOf<String, List<MessageHeader>>()
+    // Last preview's full rules, keyed by id, so acceptSuggestion() can persist
+    // the EXACT previewed rule without re-deriving (re-derivation is racy — a
+    // suggestion can vanish between preview and accept). Populated by
+    // previewSuggestions(); read by acceptSuggestion(). Ffi* stays in this file.
+    private val suggestionCache = mutableMapOf<String, FfiCrabRule>()
 
     override fun accountDraftFor(username: String): AccountDraft {
         // plausidenAccountConfig is BLOCKING + no-throw. Pure shape-map.
@@ -119,6 +133,39 @@ class ThunderCrabRepositoryImpl(
         }
     }
 
+    // --- Suggestions (local rule store; no IMAP client required) -------------
+
+    override suspend fun previewSuggestions(minObs: Long, dominance: Double): Result<List<RuleSuggestion>> =
+        ioCatching {
+            val rules = ffiPreviewSuggestions(dbPath, minObs, dominance)
+            // Refresh the accept cache to exactly this preview's rules.
+            suggestionCache.clear()
+            rules.forEach { suggestionCache[it.id] = it }
+            rules.map { it.toDomain() }
+        }
+
+    override suspend fun acceptSuggestion(id: String): Result<Unit> = ioCatching {
+        val rule = suggestionCache[id]
+            ?: throw FfiException.InvalidInput("Suggestion no longer available; refresh and try again.")
+        // The user explicitly accepted this rule -> mark provenance USER.
+        ffiSaveRule(dbPath, rule.copy(origin = FfiRuleOrigin.USER))
+    }
+
+    override suspend fun loadSavedRules(): Result<List<RuleSuggestion>> = ioCatching {
+        ffiLoadRules(dbPath).map { it.toDomain() }
+    }
+
+    override suspend fun deleteSavedRule(id: String): Result<Boolean> = ioCatching {
+        ffiDeleteRule(dbPath, id)
+    }
+
+    override suspend fun savedRulesSieve(): Result<String> = ioCatching {
+        // Load the saved rules then render — rulesToSieve needs the full FfiCrabRule.
+        // READ-ONLY: the script is returned for display, never pushed (AVP-2).
+        val rules = ffiLoadRules(dbPath)
+        ffiRulesToSieve(rules)
+    }
+
     // --- internals -----------------------------------------------------------
 
     /** Run a block with the live client on IO; map FfiException -> Result.failure. */
@@ -128,6 +175,17 @@ class ThunderCrabRepositoryImpl(
                 IllegalStateException("Not connected")
             )
             try { Result.success(block(c)) }
+            catch (e: FfiException) { Result.failure(RepositoryError(e.toErrorKind(), e.messageText())) }
+        }
+
+    /**
+     * Run a block on IO without the IMAP-client gate; map FfiException ->
+     * Result.failure. Used by the local-rule-store (Suggestions) calls, which
+     * take dbPath and must work regardless of IMAP connection state.
+     */
+    private suspend fun <T> ioCatching(block: suspend () -> T): Result<T> =
+        withContext(Dispatchers.IO) {
+            try { Result.success(block()) }
             catch (e: FfiException) { Result.failure(RepositoryError(e.toErrorKind(), e.messageText())) }
         }
 
@@ -154,6 +212,41 @@ class ThunderCrabRepositoryImpl(
     // --- Ffi* -> domain mappers (the firewall) -------------------------------
     private fun FfiFolder.toDomain() =
         Folder(name = name, specialUse = specialUse, messages = messages.toLong(), unseen = unseen.toLong())
+
+    private fun FfiCrabRule.toDomain() = RuleSuggestion(
+        id = id,
+        displayName = displayName,
+        summary = summarize(actionJson, displayName),
+    )
+
+    /**
+     * Derive a short human summary from a rule's canonical Action JSON
+     * (serde-tagged `{"kind":..}`, snake_case — see thundercrab-core crab_rule.rs).
+     * Falls back to [fallback] (the display name) on any parse failure.
+     *   file_into -> "Move to <folder>"
+     *   set_flag  -> "Flag as <flag>"
+     *   sequence  -> the first action's summary (+ "…" if more follow)
+     */
+    private fun summarize(actionJson: String, fallback: String): String = try {
+        summarizeAction(JSONObject(actionJson)) ?: fallback
+    } catch (_: Exception) {
+        fallback
+    }
+
+    private fun summarizeAction(obj: JSONObject): String? = when (obj.optString("kind")) {
+        "file_into" -> obj.optString("folder").takeIf { it.isNotBlank() }?.let { "Move to $it" }
+        "set_flag" -> obj.optString("flag").takeIf { it.isNotBlank() }?.let { "Flag as $it" }
+        "sequence" -> {
+            val actions = obj.optJSONArray("actions")
+            val first = actions?.takeIf { it.length() > 0 }?.optJSONObject(0)?.let { summarizeAction(it) }
+            when {
+                first == null -> null
+                (actions?.length() ?: 0) > 1 -> "$first …"
+                else -> first
+            }
+        }
+        else -> null
+    }
 
     private fun FfiHeaders.toDomain() = MessageHeader(
         uid = uid.toInt(), folder = folder, from = from, subject = subject,

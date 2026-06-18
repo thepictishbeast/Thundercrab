@@ -11,6 +11,7 @@ import com.plausiden.thundercrab.data.model.AccountDraft
 import com.plausiden.thundercrab.data.model.ConnectResult
 import com.plausiden.thundercrab.data.model.Folder
 import com.plausiden.thundercrab.data.model.MessageHeader
+import com.plausiden.thundercrab.data.model.RuleSuggestion
 
 /**
  * The app's only seam onto thundercrab-ffi. ViewModels depend on THIS, never on
@@ -56,6 +57,45 @@ interface ThunderCrabRepository {
     /** Best-effort logout (drops IMAP session) + close()/destroy() of the Rust handle. */
     suspend fun disconnect()
 
+    // --- Suggestions (local rule store; no IMAP session required) ------------
+    // These operate on the local dbPath rule/event store, NOT on the IMAP
+    // client, so they work whether or not connect() has succeeded. They preview
+    // + accept (save) derived rules and emit a READ-ONLY Sieve script. They MUST
+    // NOT push to any server: there is deliberately no pushSieve method here
+    // (AVP-2 guardrail, spec §6).
+
+    /**
+     * Read-only preview of derived rule suggestions from the local flag-event
+     * store. Blocking FFI run on IO; maps FfiException -> RepositoryError.
+     * The full underlying rules are cached internally, keyed by id, so a later
+     * [acceptSuggestion] can save the exact previewed rule.
+     *
+     * @param minObs    drop domain/destination pairs below this observation count.
+     * @param dominance the destination must account for at least this fraction
+     *                  (0.0..=1.0) of the domain's events.
+     */
+    suspend fun previewSuggestions(minObs: Long = 3L, dominance: Double = 0.7): Result<List<RuleSuggestion>>
+
+    /**
+     * Accept a previewed suggestion by id: persists the full underlying rule
+     * (origin marked USER) into the local store via the core. Fails with an
+     * INVALID_INPUT RepositoryError if the id is no longer in the preview cache.
+     */
+    suspend fun acceptSuggestion(id: String): Result<Unit>
+
+    /** Load every saved rule from the local store, score-desc then id-asc. */
+    suspend fun loadSavedRules(): Result<List<RuleSuggestion>>
+
+    /** Delete a saved rule by id. Returns true if a rule was removed. */
+    suspend fun deleteSavedRule(id: String): Result<Boolean>
+
+    /**
+     * Emit the personal Sieve script (RFC 5228) for the currently saved rules:
+     * loads the rules then renders them. Pure preview — NEVER pushed to a server
+     * (AVP-2 guardrail). Returns the script text for read-only display.
+     */
+    suspend fun savedRulesSieve(): Result<String>
+
     // NOTE: fetchBody is DELIBERATELY ABSENT — no caller, no-body invariant (spec §5.1).
-    // NOTE: send/pushSieve/saveRule/loadRules/deleteRule/previewSuggestions are out of P1 (spec §6).
+    // NOTE: pushSieve/sendMessage remain out of scope here (AVP-2; no live push).
 }

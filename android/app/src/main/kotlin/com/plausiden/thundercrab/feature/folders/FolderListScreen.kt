@@ -19,12 +19,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -46,6 +48,7 @@ import com.plausiden.thundercrab.data.model.Folder
 fun FolderListScreen(
     viewModel: FolderListViewModel,
     onFolderClick: (String) -> Unit,
+    onOpenSuggestions: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -53,6 +56,14 @@ fun FolderListScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Mailboxes") },
+                actions = {
+                    IconButton(onClick = onOpenSuggestions) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Suggestions",
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),

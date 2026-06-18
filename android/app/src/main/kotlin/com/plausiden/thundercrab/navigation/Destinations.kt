@@ -13,6 +13,7 @@ import android.net.Uri
 object Destinations {
     const val SETUP = "setup"
     const val FOLDERS = "folders"
+    const val SUGGESTIONS = "suggestions"
 
     // Arg keys.
     const val ARG_FOLDER = "folder"
