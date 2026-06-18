@@ -20,8 +20,10 @@
 //! (Kotlin for Android, Swift for iOS). See docs/ROADMAP-ANDROID-FIRST.md.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::{DateTime, TimeZone as _, Utc};
+use thundercrab_core::telemetry::{self, DiagCategory, DiagEvent, DiagKind};
 use thundercrab_core::{
     Action, CrabRule, Db, FlagEvent, FlagSource, MatchExpr, RuleOrigin, to_sieve,
 };
@@ -112,6 +114,139 @@ impl From<thundercrab_suggestions::SafetyError> for FfiError {
             detail: e.to_string(),
         }
     }
+}
+
+// =============================================================================
+// Diagnostics (privacy-safe telemetry)
+// =============================================================================
+
+/// Map an [`FfiError`] onto a PII-free [`DiagCategory`]. The arms read only the
+/// variant and our *own* static detail prefixes ("…timed out", "tls …") — never
+/// user data — so classification leaks nothing off-device.
+fn ffi_category(e: &FfiError) -> DiagCategory {
+    match e {
+        FfiError::Auth { .. } => DiagCategory::Auth,
+        FfiError::Protocol { .. } => DiagCategory::Protocol,
+        FfiError::NotImplemented { .. } => DiagCategory::NotImplemented,
+        FfiError::InvalidInput { .. } => DiagCategory::Internal,
+        FfiError::Transport { detail } => {
+            if detail.contains("timed out") {
+                DiagCategory::Timeout
+            } else if detail.contains("tls") {
+                DiagCategory::Tls
+            } else {
+                DiagCategory::Transport
+            }
+        }
+    }
+}
+
+/// Time an async operation and record exactly one [`DiagEvent`] for its outcome.
+/// `count_of` extracts the primary count from a success value (e.g. folders
+/// listed); failures record category-only, never the error string. This is the
+/// single instrumentation point for the network surface.
+async fn timed<T, Fut>(
+    op: &'static str,
+    ok: DiagKind,
+    fail: DiagKind,
+    count_of: impl Fn(&T) -> u64,
+    fut: Fut,
+) -> Result<T, FfiError>
+where
+    Fut: std::future::Future<Output = Result<T, FfiError>>,
+{
+    let start = Instant::now();
+    let res = fut.await;
+    let ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match &res {
+        Ok(v) => telemetry::record_event(ok, DiagCategory::None, op, count_of(v), 0, ms),
+        Err(e) => telemetry::record_event(fail, ffi_category(e), op, 0, 0, ms),
+    }
+    res
+}
+
+/// A diagnostic event flattened for the FFI: the Rust enums are stringified
+/// (their stable `Debug` names) so the UI needs no parallel enum on the binding
+/// side. PII-free — the type has no field that could hold user data.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiDiagEvent {
+    /// [`DiagKind`] name (e.g. `"ConnectFail"`).
+    pub kind: String,
+    /// [`DiagCategory`] name (e.g. `"Auth"`).
+    pub category: String,
+    /// Stable numeric code (`kind * 1000 + category`).
+    pub code: u32,
+    /// Static operation label (e.g. `"list_folders"`).
+    pub op: String,
+    /// Primary count (folders listed, headers fetched, …).
+    pub count: u64,
+    /// Secondary count (folders skipped, retries, …).
+    pub extra: u64,
+    /// Operation duration in milliseconds.
+    pub duration_ms: u64,
+    /// Event time, milliseconds since the Unix epoch.
+    pub at_unix_ms: u64,
+}
+
+impl From<DiagEvent> for FfiDiagEvent {
+    fn from(e: DiagEvent) -> Self {
+        Self {
+            kind: format!("{:?}", e.kind),
+            category: format!("{:?}", e.category),
+            code: e.code,
+            op: e.op.to_string(),
+            count: e.count,
+            extra: e.extra,
+            duration_ms: e.duration_ms,
+            at_unix_ms: e.at_unix_ms,
+        }
+    }
+}
+
+/// Copy out recent diagnostic events without clearing them (for the in-app
+/// diagnostics screen / "what would be sent" preview).
+#[uniffi::export]
+#[must_use]
+pub fn diagnostics_snapshot() -> Vec<FfiDiagEvent> {
+    telemetry::snapshot().into_iter().map(Into::into).collect()
+}
+
+/// Take and clear all buffered diagnostic events (so an upload does not re-send
+/// what it already shipped).
+#[uniffi::export]
+#[must_use]
+pub fn diagnostics_drain() -> Vec<FfiDiagEvent> {
+    telemetry::drain().into_iter().map(Into::into).collect()
+}
+
+/// Discard all buffered diagnostic events (e.g. when the user declines or
+/// disables telemetry).
+#[uniffi::export]
+pub fn diagnostics_clear() {
+    telemetry::clear();
+}
+
+/// Recent diagnostic events serialized as a JSON array — the exact, auditable
+/// payload an upload would send, so the UI can show "here is what we send".
+#[uniffi::export]
+#[must_use]
+pub fn diagnostics_json() -> String {
+    telemetry::to_json(&telemetry::snapshot())
+}
+
+/// Master switch for diagnostics. The app calls this at startup with its
+/// build-type flag (off for production releases) and again whenever the user
+/// toggles telemetry in settings. When off, nothing is collected or buffered.
+#[uniffi::export]
+pub fn telemetry_set_enabled(on: bool) {
+    telemetry::set_enabled(on);
+}
+
+/// Whether diagnostic collection is currently enabled.
+#[uniffi::export]
+#[must_use]
+pub fn telemetry_is_enabled() -> bool {
+    telemetry::is_enabled()
 }
 
 // =============================================================================
@@ -609,8 +744,17 @@ pub async fn send_message(
         subject: message.subject.as_str(),
         body: message.body.as_str(),
     };
-    smtp::send_message(&account, &password, encryption.into(), &outbound).await?;
-    Ok(())
+    timed(
+        "send_message",
+        DiagKind::SendOk,
+        DiagKind::SendFail,
+        |_: &()| 0,
+        async {
+            smtp::send_message(&account, &password, encryption.into(), &outbound).await?;
+            Ok(())
+        },
+    )
+    .await
 }
 
 /// Push an active Sieve script via `ManageSieve`. Takes the password and the
@@ -628,13 +772,24 @@ pub async fn push_sieve(
     script: String,
 ) -> Result<(), FfiError> {
     let account = AccountConfig::from(&cfg);
-    tokio::time::timeout(
-        OP_TIMEOUT,
-        managesieve::put_active_script(&account, &password, &script_name, &script),
+    timed(
+        "push_sieve",
+        DiagKind::SievePushOk,
+        DiagKind::SievePushFail,
+        |_: &()| 0,
+        async {
+            tokio::time::timeout(
+                OP_TIMEOUT,
+                managesieve::put_active_script(&account, &password, &script_name, &script),
+            )
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "push_sieve timed out".to_string(),
+            })??;
+            Ok(())
+        },
     )
     .await
-    .map_err(|_| FfiError::Transport { detail: "push_sieve timed out".to_string() })??;
-    Ok(())
 }
 
 // =============================================================================
@@ -663,12 +818,35 @@ pub async fn connect(
     password: String,
 ) -> Result<Arc<ThunderCrabClient>, FfiError> {
     let account = AccountConfig::from(&cfg);
-    let backend = tokio::time::timeout(OP_TIMEOUT, RustImapBackend::connect(&account, &password))
-        .await
-        .map_err(|_| FfiError::Transport { detail: "connect timed out".to_string() })??;
-    Ok(Arc::new(ThunderCrabClient {
-        inner: Mutex::new(Some(backend)),
-    }))
+    let start = Instant::now();
+    let res: Result<Arc<ThunderCrabClient>, FfiError> = async {
+        let backend =
+            tokio::time::timeout(OP_TIMEOUT, RustImapBackend::connect(&account, &password))
+                .await
+                .map_err(|_| FfiError::Transport {
+                    detail: "connect timed out".to_string(),
+                })??;
+        Ok(Arc::new(ThunderCrabClient {
+            inner: Mutex::new(Some(backend)),
+        }))
+    }
+    .await;
+    let ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match &res {
+        Ok(_) => telemetry::record_event(DiagKind::ConnectOk, DiagCategory::None, "connect", 0, 0, ms),
+        Err(e) => {
+            // Distinguish a rejected LOGIN (AuthFail) from a connect/TLS
+            // failure so the dashboard separates "wrong password" from
+            // "can't reach the server".
+            let kind = if matches!(e, FfiError::Auth { .. }) {
+                DiagKind::AuthFail
+            } else {
+                DiagKind::ConnectFail
+            };
+            telemetry::record_event(kind, ffi_category(e), "connect", 0, 0, ms);
+        }
+    }
+    res
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -679,20 +857,31 @@ impl ThunderCrabClient {
     /// `Protocol` on IMAP failure; `NotImplemented` if the client was already
     /// logged out.
     pub async fn list_folders(&self) -> Result<Vec<FfiFolder>, FfiError> {
-        let guard = self.inner.lock().await;
-        let backend = guard.as_ref().ok_or_else(client_gone)?;
-        let folders = tokio::time::timeout(OP_TIMEOUT, backend.list_folders())
-            .await
-            .map_err(|_| FfiError::Transport { detail: "list_folders timed out".to_string() })??;
-        Ok(folders
-            .into_iter()
-            .map(|f| FfiFolder {
-                name: f.name,
-                special_use: f.special_use,
-                messages: f.messages,
-                unseen: f.unseen,
-            })
-            .collect())
+        timed(
+            "list_folders",
+            DiagKind::ListFoldersOk,
+            DiagKind::ListFoldersFail,
+            |v: &Vec<FfiFolder>| u64::try_from(v.len()).unwrap_or(u64::MAX),
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                let folders = tokio::time::timeout(OP_TIMEOUT, backend.list_folders())
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "list_folders timed out".to_string(),
+                    })??;
+                Ok(folders
+                    .into_iter()
+                    .map(|f| FfiFolder {
+                        name: f.name,
+                        special_use: f.special_use,
+                        messages: f.messages,
+                        unseen: f.unseen,
+                    })
+                    .collect())
+            },
+        )
+        .await
     }
 
     /// Fetch headers for messages in `folder`, optionally limited to the most
@@ -705,25 +894,37 @@ impl ThunderCrabClient {
         folder: String,
         limit: Option<u32>,
     ) -> Result<Vec<FfiHeaders>, FfiError> {
-        let guard = self.inner.lock().await;
-        let backend = guard.as_ref().ok_or_else(client_gone)?;
-        let headers = tokio::time::timeout(OP_TIMEOUT, backend.fetch_headers(&folder, limit))
-            .await
-            .map_err(|_| FfiError::Transport { detail: "fetch_headers timed out".to_string() })??;
-        Ok(headers
-            .into_iter()
-            .map(|h| FfiHeaders {
-                uid: h.uid,
-                folder: h.folder,
-                from: h.from,
-                subject: h.subject,
-                other_headers: h
-                    .other_headers
+        timed(
+            "fetch_headers",
+            DiagKind::FetchHeadersOk,
+            DiagKind::FetchHeadersFail,
+            |v: &Vec<FfiHeaders>| u64::try_from(v.len()).unwrap_or(u64::MAX),
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                let headers =
+                    tokio::time::timeout(OP_TIMEOUT, backend.fetch_headers(&folder, limit))
+                        .await
+                        .map_err(|_| FfiError::Transport {
+                            detail: "fetch_headers timed out".to_string(),
+                        })??;
+                Ok(headers
                     .into_iter()
-                    .map(|(name, value)| FfiHeader { name, value })
-                    .collect(),
-            })
-            .collect())
+                    .map(|h| FfiHeaders {
+                        uid: h.uid,
+                        folder: h.folder,
+                        from: h.from,
+                        subject: h.subject,
+                        other_headers: h
+                            .other_headers
+                            .into_iter()
+                            .map(|(name, value)| FfiHeader { name, value })
+                            .collect(),
+                    })
+                    .collect())
+            },
+        )
+        .await
     }
 
     /// Move `uid` from `from_folder` to `to_folder` (the IMAP side of a
@@ -737,12 +938,26 @@ impl ThunderCrabClient {
         to_folder: String,
         uid: u32,
     ) -> Result<(), FfiError> {
-        let guard = self.inner.lock().await;
-        let backend = guard.as_ref().ok_or_else(client_gone)?;
-        tokio::time::timeout(OP_TIMEOUT, backend.move_message(&from_folder, &to_folder, uid))
-            .await
-            .map_err(|_| FfiError::Transport { detail: "move_message timed out".to_string() })??;
-        Ok(())
+        timed(
+            "move_message",
+            DiagKind::MoveOk,
+            DiagKind::MoveFail,
+            |_: &()| 0,
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                tokio::time::timeout(
+                    OP_TIMEOUT,
+                    backend.move_message(&from_folder, &to_folder, uid),
+                )
+                .await
+                .map_err(|_| FfiError::Transport {
+                    detail: "move_message timed out".to_string(),
+                })??;
+                Ok(())
+            },
+        )
+        .await
     }
 
     /// Set or clear an IMAP `flag` on `uid` in `folder` (the IMAP side of a
@@ -757,12 +972,23 @@ impl ThunderCrabClient {
         flag: String,
         set: bool,
     ) -> Result<(), FfiError> {
-        let guard = self.inner.lock().await;
-        let backend = guard.as_ref().ok_or_else(client_gone)?;
-        tokio::time::timeout(OP_TIMEOUT, backend.set_flag(&folder, uid, &flag, set))
-            .await
-            .map_err(|_| FfiError::Transport { detail: "set_flag timed out".to_string() })??;
-        Ok(())
+        timed(
+            "set_flag",
+            DiagKind::FlagOk,
+            DiagKind::FlagFail,
+            |_: &()| 0,
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                tokio::time::timeout(OP_TIMEOUT, backend.set_flag(&folder, uid, &flag, set))
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "set_flag timed out".to_string(),
+                    })??;
+                Ok(())
+            },
+        )
+        .await
     }
 
     /// Fetch a message body. NOT IMPLEMENTED: `thundercrab-imap` exposes no

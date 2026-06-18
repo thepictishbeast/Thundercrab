@@ -117,16 +117,63 @@ impl RustImapBackend {
     }
 }
 
+/// A folder discovered via `LIST`, with the bits we need *before* we
+/// decide whether to issue `STATUS` against it.
+struct FolderEntry {
+    name: String,
+    /// `false` for `\Noselect` / `\NonExistent` placeholders — these
+    /// cannot be `STATUS`'d (the server returns an error), so we must
+    /// not query them.
+    selectable: bool,
+    /// RFC 6154 special-use marker (e.g. `\Sent`) if the server reports
+    /// one in the `LIST` reply. Lets the UI label/order folders without
+    /// a second round-trip.
+    special_use: Option<String>,
+}
+
+impl FolderEntry {
+    fn from_list(name: &async_imap::types::Name) -> Self {
+        use async_imap::types::NameAttribute;
+        let mut selectable = true;
+        let mut special_use = None;
+        for attr in name.attributes() {
+            match attr {
+                NameAttribute::NoSelect => selectable = false,
+                NameAttribute::All => special_use = Some("\\All".to_string()),
+                NameAttribute::Archive => special_use = Some("\\Archive".to_string()),
+                NameAttribute::Drafts => special_use = Some("\\Drafts".to_string()),
+                NameAttribute::Flagged => special_use = Some("\\Flagged".to_string()),
+                NameAttribute::Junk => special_use = Some("\\Junk".to_string()),
+                NameAttribute::Sent => special_use = Some("\\Sent".to_string()),
+                NameAttribute::Trash => special_use = Some("\\Trash".to_string()),
+                // `\NonExistent` (RFC 5258) arrives as an extension attr;
+                // like `\Noselect` it marks a name that isn't a real,
+                // openable mailbox.
+                NameAttribute::Extension(ext) if ext.eq_ignore_ascii_case("\\NonExistent") => {
+                    selectable = false;
+                }
+                _ => {}
+            }
+        }
+        Self {
+            name: name.name().to_string(),
+            selectable,
+            special_use,
+        }
+    }
+}
+
 impl Backend for RustImapBackend {
     async fn list_folders(&self) -> Result<Vec<FolderSummary>, BackendError> {
         let mut session = self.session.lock().await;
 
-        // LIST "" "*" enumerates every mailbox the user can see.
-        // We then issue STATUS per folder for MESSAGES + UNSEEN. STATUS
-        // is non-destructive (does not change the selected mailbox)
-        // which is what we want — listing should be safe to call from
-        // anywhere in the GUI without disturbing other workflows.
-        let names: Vec<String> = {
+        // LIST "" "*" enumerates every mailbox the user can see. We
+        // capture each folder's name *and* its name-attributes so we can
+        // (a) skip unselectable placeholders and (b) surface special-use
+        // markers to the UI. STATUS (issued below, per selectable folder)
+        // is non-destructive — it does not change the selected mailbox —
+        // so listing is safe to call from anywhere in the GUI.
+        let entries: Vec<FolderEntry> = {
             let mut stream = session
                 .list(Some(""), Some("*"))
                 .await
@@ -135,29 +182,59 @@ impl Backend for RustImapBackend {
             while let Some(item) = stream.next().await {
                 let name = item
                     .map_err(|e| BackendError::Protocol(format!("list item: {e}")))?;
-                // .name() and .attributes() borrow from `name`; we
-                // need owned values to release the borrow before the
-                // stream ends and `name` goes out of scope.
-                acc.push(name.name().to_string());
+                // Borrow ends here: we extract owned values before the
+                // stream advances and `name` is dropped.
+                acc.push(FolderEntry::from_list(&name));
             }
             acc
         };
 
-        let mut out = Vec::with_capacity(names.len());
-        for name in names {
-            let status = session
-                .status(&name, "(MESSAGES UNSEEN)")
-                .await
-                .map_err(|e| BackendError::Protocol(format!("status {name}: {e}")))?;
-            // async-imap returns the requested counts on the same
-            // `Mailbox` struct: `exists` carries the MESSAGES total
-            // and `unseen` carries the UNSEEN count.
+        let mut out = Vec::with_capacity(entries.len());
+        let mut skipped = 0usize;
+        for entry in entries {
+            // CRITICAL: one bad folder must never sink the whole mailbox
+            // load. A stale, unselectable hierarchy placeholder (the very
+            // class of folder that produced "Couldn't load mailboxes")
+            // is recorded with zero counts and never STATUS'd; a STATUS
+            // error on an otherwise-selectable folder is logged and
+            // degraded to zero counts rather than propagated.
+            let (messages, unseen) = if entry.selectable {
+                match session.status(&entry.name, "(MESSAGES UNSEEN)").await {
+                    Ok(status) => (
+                        u64::from(status.exists),
+                        u64::from(status.unseen.unwrap_or(0)),
+                    ),
+                    Err(e) => {
+                        skipped += 1;
+                        tracing::warn!(
+                            folder = %entry.name,
+                            error = %e,
+                            "STATUS failed; listing folder with zero counts"
+                        );
+                        (0, 0)
+                    }
+                }
+            } else {
+                skipped += 1;
+                tracing::debug!(
+                    folder = %entry.name,
+                    "unselectable folder (\\Noselect/\\NonExistent); skipping STATUS"
+                );
+                (0, 0)
+            };
             out.push(FolderSummary {
-                name: name.clone(),
-                special_use: None, // SPECIAL-USE attrs would need a re-LIST; deferred
-                messages: u64::from(status.exists),
-                unseen: u64::from(status.unseen.unwrap_or(0)),
+                name: entry.name,
+                special_use: entry.special_use,
+                messages,
+                unseen,
             });
+        }
+        if skipped > 0 {
+            tracing::info!(
+                folders = out.len(),
+                skipped,
+                "listed folders; some had no usable STATUS"
+            );
         }
         Ok(out)
     }
