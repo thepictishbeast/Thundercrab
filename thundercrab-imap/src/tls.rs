@@ -85,6 +85,11 @@ fn provider_for(mode: CryptoMode) -> Arc<CryptoProvider> {
 /// `aws-lc-rs` provider always supports the default (TLS 1.2 + 1.3) versions —
 /// TLS 1.3 is required for hybrid KEX — so `with_safe_default_protocol_versions`
 /// cannot fail for these inputs.
+///
+/// # Panics
+/// Only if the `aws-lc-rs` provider cannot offer the default TLS protocol
+/// versions — impossible for this compiled-in provider, so the panic is
+/// effectively unreachable.
 #[must_use]
 pub fn client_config(mode: CryptoMode) -> ClientConfig {
     ensure_provider();
