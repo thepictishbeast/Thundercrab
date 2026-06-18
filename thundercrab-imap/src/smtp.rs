@@ -95,6 +95,7 @@ pub async fn send_message(
                 .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?
                 .port(cfg.smtp_port)
                 .credentials(creds)
+                .timeout(Some(crate::CONNECT_TIMEOUT)) // explicit + consistent w/ IMAP/sieve (lettre default is 60s)
                 .build()
         }
         SmtpEncryption::ImplicitTls => {
@@ -102,6 +103,7 @@ pub async fn send_message(
                 .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?
                 .port(cfg.smtp_port)
                 .credentials(creds)
+                .timeout(Some(crate::CONNECT_TIMEOUT)) // explicit + consistent w/ IMAP/sieve (lettre default is 60s)
                 .build()
         }
     };
