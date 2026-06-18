@@ -197,7 +197,7 @@ class ThunderCrabRepositoryImpl(
             messageHash = hash,
             source = source,
             destination = destination,
-            fromDomainWithAt = "@" + h.from.substringAfterLast('@').substringBefore('>').trim(),
+            fromDomainWithAt = senderDomainWithAt(h.from), // robust parse; "" if unparseable
             listId = h.headerValue("List-Id"),
             hasListUnsubscribe = h.headerValue("List-Unsubscribe") != null,
             subjectTokens = h.subject.lowercase().split(Regex("\\W+")).filter { it.isNotBlank() },
