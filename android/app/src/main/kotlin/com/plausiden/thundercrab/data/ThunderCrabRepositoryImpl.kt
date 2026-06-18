@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 // The ONE import block of the generated surface, isolated to this file:
 import uniffi.thundercrab_ffi.FfiAccountConfig
+import uniffi.thundercrab_ffi.FfiCryptoMode
 import uniffi.thundercrab_ffi.FfiCrabRule
 import uniffi.thundercrab_ffi.FfiException
 import uniffi.thundercrab_ffi.FfiFlagEvent
@@ -228,6 +229,9 @@ class ThunderCrabRepositoryImpl(
             imapHost = imapHost, imapPort = imapPort.toUShort(),
             smtpHost = smtpHost, smtpPort = smtpPort.toUShort(),
             sievePort = sievePort.toUShort(), username = username,
+            // Post-quantum hybrid KEX by default (classical fallback is automatic).
+            // A future settings screen will let the user change this.
+            cryptoMode = FfiCryptoMode.PQ_HYBRID,
         )
     } catch (_: NumberFormatException) { null }
 
