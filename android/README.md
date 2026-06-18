@@ -1,9 +1,12 @@
 # ThunderCrab for Android
 
 > **AVP-2 — UNVERIFIED — UNSAFE — nothing here is `SHIP-DECISION:`.**
-> This is a scaffold. It has not been verified end-to-end, it is not signed with a
-> release key, and no part of it is approved for shipping. Treat every claim below as
-> provisional until independently checked.
+> The app now **builds headless** (debug + R8 release), **signs** (debug key),
+> **launches** to a resumed activity, and passes an **on-device FFI test** + JVM
+> unit tests — see **Verification status** below. It has **not** been exercised as a
+> human-driven UX, is **not** signed with a real release key, and the live
+> ManageSieve push is **deliberately disabled**. Treat every claim as provisional
+> until independently checked.
 
 A thin Jetpack Compose front-end for the ThunderCrab mail engine. **All mail logic
 lives in the Rust core** (`thundercrab-core` / `thundercrab-imap` / `thundercrab-suggestions`),
@@ -24,19 +27,44 @@ replaces). We mine Thunderbird/K-9 for UX patterns only, never code.
 
 ---
 
-## What's in this build (P1 — four screens)
+## What's in this build (P1 — five screens; P2 — server coupling)
 
 | # | Screen | Route | FFI it calls (via the Repository) |
 |---|--------|-------|-----------------------------------|
 | 1 | Account Setup | `setup` | `plausidenAccountConfig(username)` to prefill host/ports; `connect(cfg, password)` on submit |
-| 2 | Folder List | `folders` | `listFolders()` |
+| 2 | Folder List | `folders` | `listFolders()`; top-bar action opens Suggestions |
 | 3 | Message List | `messages/{folder}` | `fetchHeaders(folder, 50)`; row actions `setFlag(...)` / `moveMessage(...)` each followed by `recordFlagEvent(...)` |
 | 4 | Message Read | `read/{folder}/{uid}` | **none for the body** — headers come from an in-memory cache populated by screen 3 |
+| 5 | Suggestions | `suggestions` | `previewSuggestions(minObs,dominance)` → accept = `saveRule`; `loadRules` / `deleteRule`; `rulesToSieve(...)` shows the emitted personal Sieve **read-only** |
 
-The core FFI also exposes `sendMessage`, `pushSieve`, `saveRule`, `loadRules`,
-`deleteRule`, and `previewSuggestions`, but **these are not surfaced in P1** — there is
-no Compose/send/rules/suggestions screen in this build. A tight four-screen surface is
-preferred over a complete one for the scaffold.
+**P2 server coupling (offline-safe).** Screen 5 closes the federated-learning loop on
+the phone: flag/move events (screen 3) → derived suggestions → one-tap accept → the
+exact personal Sieve that *would* install, shown read-only. The Rust core emits the
+Sieve (`thundercrab-core::sieve`, validated against Dovecot's `sievec`). **The live
+ManageSieve push (`pushSieve`) is deliberately NOT wired** — the "Push to server" button
+is a disabled placeholder. A live push requires explicit operator consent and a throwaway
+test account; it will never target a real mailbox unattended. `sendMessage` is also not
+yet surfaced.
+
+---
+
+## Verification status (headless, on prime)
+
+Proven (not assumed) by the toolchain on plausiden-prime:
+
+| What | How | Status |
+|------|-----|--------|
+| Rust core cross-compiles to Android | `cargo ndk … -p thundercrab-ffi` | ✅ all 4 ABIs |
+| App compiles vs real generated bindings | `./gradlew :app:assembleDebug` | ✅ |
+| Signed universal debug APK | `apksigner verify` | ✅ |
+| Launches to a resumed `MainActivity` | headless emulator (android-34 x86_64) | ✅ no crash |
+| Rust core loads + runs through JNA on-device | instrumented `FfiOnDeviceTest` | ✅ 2/2 |
+| Rule-summary logic | JVM unit tests `RuleSummaryTest` | ✅ 7/7 |
+| Sieve emitter | Dovecot `sievec` | ✅ (in `thundercrab-core`) |
+| Release / R8 minified build | `./gradlew :app:assembleRelease` | ✅ (JNA AWT `-dontwarn`) |
+
+**Not yet done:** a human-driven UX pass on a real device; the live ManageSieve push;
+release-key signing. AVP-2: nothing is `SHIP-DECISION:`.
 
 ---
 
