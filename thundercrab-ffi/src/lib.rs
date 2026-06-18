@@ -681,7 +681,9 @@ impl ThunderCrabClient {
     pub async fn list_folders(&self) -> Result<Vec<FfiFolder>, FfiError> {
         let guard = self.inner.lock().await;
         let backend = guard.as_ref().ok_or_else(client_gone)?;
-        let folders = backend.list_folders().await?;
+        let folders = tokio::time::timeout(OP_TIMEOUT, backend.list_folders())
+            .await
+            .map_err(|_| FfiError::Transport { detail: "list_folders timed out".to_string() })??;
         Ok(folders
             .into_iter()
             .map(|f| FfiFolder {
@@ -705,7 +707,9 @@ impl ThunderCrabClient {
     ) -> Result<Vec<FfiHeaders>, FfiError> {
         let guard = self.inner.lock().await;
         let backend = guard.as_ref().ok_or_else(client_gone)?;
-        let headers = backend.fetch_headers(&folder, limit).await?;
+        let headers = tokio::time::timeout(OP_TIMEOUT, backend.fetch_headers(&folder, limit))
+            .await
+            .map_err(|_| FfiError::Transport { detail: "fetch_headers timed out".to_string() })??;
         Ok(headers
             .into_iter()
             .map(|h| FfiHeaders {
@@ -735,7 +739,9 @@ impl ThunderCrabClient {
     ) -> Result<(), FfiError> {
         let guard = self.inner.lock().await;
         let backend = guard.as_ref().ok_or_else(client_gone)?;
-        backend.move_message(&from_folder, &to_folder, uid).await?;
+        tokio::time::timeout(OP_TIMEOUT, backend.move_message(&from_folder, &to_folder, uid))
+            .await
+            .map_err(|_| FfiError::Transport { detail: "move_message timed out".to_string() })??;
         Ok(())
     }
 
@@ -753,7 +759,9 @@ impl ThunderCrabClient {
     ) -> Result<(), FfiError> {
         let guard = self.inner.lock().await;
         let backend = guard.as_ref().ok_or_else(client_gone)?;
-        backend.set_flag(&folder, uid, &flag, set).await?;
+        tokio::time::timeout(OP_TIMEOUT, backend.set_flag(&folder, uid, &flag, set))
+            .await
+            .map_err(|_| FfiError::Transport { detail: "set_flag timed out".to_string() })??;
         Ok(())
     }
 
@@ -781,7 +789,8 @@ impl ThunderCrabClient {
             guard.take()
         };
         if let Some(backend) = backend {
-            backend.logout().await;
+            // Best-effort + bounded: a stalled server must not hang disconnect.
+            let _ = tokio::time::timeout(OP_TIMEOUT, backend.logout()).await;
         }
     }
 }
