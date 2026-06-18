@@ -1,13 +1,11 @@
 // ============================================================================
 // feature/messages/MessageListScreen.kt  (UI group)
-// Screen 3 — Message List. HEADER-ONLY rows (from, subject). Tap a row → read.
-// An overflow menu per row offers flag/seen toggles and move-to-folder; each
-// of those calls the VM (onToggleSeen / onToggleFlagged / onMove), which is
-// exactly where the Repository emits a features-only FlagEvent internally.
-//
-// MessageHeader carries no flag state, so the menu offers explicit set/clear
-// actions rather than reflecting a current toggle. Move target is typed into a
-// dialog — folder names are never hardcoded. AVP-2: UNVERIFIED.
+// Message List — the app HOME (opens on INBOX). Thunderbird-style rows: a
+// colored sender avatar, sender, and subject (HEADER-ONLY; no body preview, by
+// the no-body invariant). Tap a row → read. The nav icon is a Menu that opens
+// the mailbox list. Per-row overflow offers flag/seen/move; each calls the VM,
+// which is where the Repository emits a features-only FlagEvent internally.
+// AVP-2: UNVERIFIED.
 // ============================================================================
 package com.plausiden.thundercrab.feature.messages
 
@@ -16,14 +14,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -41,7 +42,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,18 +56,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.plausiden.thundercrab.data.model.MessageHeader
+import com.plausiden.thundercrab.ui.components.SenderAvatar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageListScreen(
     viewModel: MessageListViewModel,
-    onBack: () -> Unit,
+    onOpenFolders: () -> Unit,
     onMessageClick: (Int) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-
-    // Dialog state for the "move" action (typed destination folder).
     var moveTargetUid by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(state.errorMessage) {
@@ -82,17 +81,26 @@ fun MessageListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(state.folder) },
+                title = {
+                    Text(
+                        text = prettyFolder(state.folder),
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onOpenFolders) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            imageVector = Icons.Filled.Menu,
+                            contentDescription = "Mailboxes",
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.primary,
                 ),
             )
         },
@@ -104,32 +112,30 @@ fun MessageListScreen(
                 .padding(innerPadding),
         ) {
             when {
-                state.loading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
+                state.loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
 
-                state.messages.isEmpty() -> {
-                    EmptyOrError(
-                        errorMessage = state.errorMessage,
-                        onRetry = viewModel::refresh,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-                }
+                state.messages.isEmpty() -> EmptyOrError(
+                    errorMessage = state.errorMessage,
+                    onRetry = viewModel::refresh,
+                    modifier = Modifier.align(Alignment.Center),
+                )
 
-                else -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(items = state.messages, key = { it.uid }) { header ->
-                            MessageRow(
-                                header = header,
-                                onClick = { onMessageClick(header.uid) },
-                                onMarkSeen = { viewModel.onToggleSeen(header.uid, true) },
-                                onMarkUnseen = { viewModel.onToggleSeen(header.uid, false) },
-                                onFlag = { viewModel.onToggleFlagged(header.uid, true) },
-                                onUnflag = { viewModel.onToggleFlagged(header.uid, false) },
-                                onMove = { moveTargetUid = header.uid },
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-                        }
+                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(items = state.messages, key = { it.uid }) { header ->
+                        MessageRow(
+                            header = header,
+                            onClick = { onMessageClick(header.uid) },
+                            onMarkSeen = { viewModel.onToggleSeen(header.uid, true) },
+                            onMarkUnseen = { viewModel.onToggleSeen(header.uid, false) },
+                            onFlag = { viewModel.onToggleFlagged(header.uid, true) },
+                            onUnflag = { viewModel.onToggleFlagged(header.uid, false) },
+                            onMove = { moveTargetUid = header.uid },
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(start = 74.dp),
+                        )
                     }
                 }
             }
@@ -148,6 +154,10 @@ fun MessageListScreen(
     }
 }
 
+/** Strip the IMAP hierarchy prefix for a friendlier title (Archive/2026 → 2026). */
+private fun prettyFolder(raw: String): String =
+    raw.substringAfterLast('/').ifBlank { raw }
+
 @Composable
 private fun MessageRow(
     header: MessageHeader,
@@ -159,17 +169,20 @@ private fun MessageRow(
     onMove: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val sender = header.from.ifBlank { "(unknown sender)" }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = 20.dp, end = 4.dp, top = 14.dp, bottom = 14.dp),
+            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        SenderAvatar(seed = sender)
+        Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = header.from.ifBlank { "(unknown sender)" },
+                text = sender,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -188,52 +201,29 @@ private fun MessageRow(
                 Icon(
                     imageVector = Icons.Filled.MoreVert,
                     contentDescription = "Message actions",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Mark as read") },
-                    onClick = { menuExpanded = false; onMarkSeen() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Mark as unread") },
-                    onClick = { menuExpanded = false; onMarkUnseen() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Flag") },
-                    onClick = { menuExpanded = false; onFlag() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Unflag") },
-                    onClick = { menuExpanded = false; onUnflag() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Move to…") },
-                    onClick = { menuExpanded = false; onMove() },
-                )
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                DropdownMenuItem(text = { Text("Mark as read") }, onClick = { menuExpanded = false; onMarkSeen() })
+                DropdownMenuItem(text = { Text("Mark as unread") }, onClick = { menuExpanded = false; onMarkUnseen() })
+                DropdownMenuItem(text = { Text("Flag") }, onClick = { menuExpanded = false; onFlag() })
+                DropdownMenuItem(text = { Text("Unflag") }, onClick = { menuExpanded = false; onUnflag() })
+                DropdownMenuItem(text = { Text("Move to…") }, onClick = { menuExpanded = false; onMove() })
             }
         }
     }
 }
 
 @Composable
-private fun MoveDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
+private fun MoveDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var destination by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Move message") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Enter the destination mailbox name.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Text("Enter the destination mailbox name.", style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     value = destination,
                     onValueChange = { destination = it },
@@ -244,34 +234,23 @@ private fun MoveDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm(destination.trim()) },
-                enabled = destination.isNotBlank(),
-            ) { Text("Move") }
+            TextButton(onClick = { onConfirm(destination.trim()) }, enabled = destination.isNotBlank()) {
+                Text("Move")
+            }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
 @Composable
-private fun EmptyOrError(
-    errorMessage: String?,
-    onRetry: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun EmptyOrError(errorMessage: String?, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (errorMessage != null) {
-            Text(
-                text = "Couldn't load messages",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
+            Text("Couldn't load messages", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
             Text(
                 text = errorMessage,
                 style = MaterialTheme.typography.bodySmall,
@@ -279,11 +258,7 @@ private fun EmptyOrError(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            Text(
-                text = "No messages in this mailbox.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Text("No messages in this mailbox.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Button(onClick = onRetry) { Text("Refresh") }
     }

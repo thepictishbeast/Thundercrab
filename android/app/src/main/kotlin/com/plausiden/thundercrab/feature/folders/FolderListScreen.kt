@@ -1,12 +1,12 @@
 // ============================================================================
 // feature/folders/FolderListScreen.kt  (UI group)
-// Screen 2 — Folder List. Renders the sealed FolderListUiState
-// (Loading / Success / Error). Each row shows name, special-use label, and
-// total / unseen counts. Tapping a row navigates to messages/{folder}.
-// AVP-2: UNVERIFIED.
+// Mailbox list — reached from the inbox via the Menu icon. Thunderbird-style:
+// a branded header, then rows with a special-use icon, name, count, and an
+// unread badge. Tapping a row navigates to messages/{folder}. AVP-2: UNVERIFIED.
 // ============================================================================
 package com.plausiden.thundercrab.feature.folders
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,8 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -49,23 +56,28 @@ fun FolderListScreen(
     viewModel: FolderListViewModel,
     onFolderClick: (String) -> Unit,
     onOpenSuggestions: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Mailboxes") },
+                title = { Text("Mailboxes", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to inbox")
+                    }
+                },
                 actions = {
                     IconButton(onClick = onOpenSuggestions) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "Suggestions",
-                        )
+                        Icon(Icons.Filled.Settings, contentDescription = "Rule suggestions")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.primary,
                 ),
             )
         },
@@ -76,18 +88,15 @@ fun FolderListScreen(
                 .padding(innerPadding),
         ) {
             when (val s = state) {
-                is FolderListUiState.Loading -> {
+                is FolderListUiState.Loading ->
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
 
-                is FolderListUiState.Error -> {
-                    ErrorState(
-                        kind = s.kind,
-                        message = s.message,
-                        onRetry = viewModel::refresh,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-                }
+                is FolderListUiState.Error -> ErrorState(
+                    kind = s.kind,
+                    message = s.message,
+                    onRetry = viewModel::refresh,
+                    modifier = Modifier.align(Alignment.Center),
+                )
 
                 is FolderListUiState.Success -> {
                     if (s.folders.isEmpty()) {
@@ -99,16 +108,43 @@ fun FolderListScreen(
                         )
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            item { MailboxesHeader(count = s.folders.size, unread = s.folders.sumOf { it.unseen }) }
                             items(items = s.folders, key = { it.name }) { folder ->
                                 FolderRow(folder = folder, onClick = { onFolderClick(folder.name) })
                                 HorizontalDivider(
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    color = MaterialTheme.colorScheme.outlineVariant,
+                                    thickness = 0.5.dp,
+                                    modifier = Modifier.padding(start = 64.dp),
                                 )
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MailboxesHeader(count: Int, unread: Long) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Column {
+            Text(
+                text = "ThunderCrab",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
+                text = if (unread > 0) "$count mailboxes · $unread unread" else "$count mailboxes",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
         }
     }
 }
@@ -121,10 +157,10 @@ private fun FolderRow(folder: Folder, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Icon(
-            imageVector = Icons.AutoMirrored.Filled.List,
+            imageVector = folderIcon(folder),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
         )
@@ -134,12 +170,8 @@ private fun FolderRow(folder: Folder, onClick: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = if (folder.unseen > 0) FontWeight.SemiBold else FontWeight.Normal,
             )
-            val subtitle = buildString {
-                folder.specialUse?.let { append(it).append(" · ") }
-                append("${folder.messages} total")
-            }
             Text(
-                text = subtitle,
+                text = "${folder.messages} total",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -148,30 +180,32 @@ private fun FolderRow(folder: Folder, onClick: () -> Unit) {
             Badge(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Text(folder.unseen.toString())
-            }
+            ) { Text(folder.unseen.toString()) }
         }
     }
 }
 
+/** Map a folder to a core Material icon by special-use marker / name. */
+private fun folderIcon(folder: Folder): ImageVector {
+    val su = folder.specialUse?.lowercase().orEmpty()
+    return when {
+        folder.name.equals("INBOX", ignoreCase = true) || su.contains("inbox") -> Icons.Filled.Email
+        su.contains("sent") -> Icons.AutoMirrored.Filled.Send
+        su.contains("draft") -> Icons.Filled.Edit
+        su.contains("trash") -> Icons.Filled.Delete
+        su.contains("junk") -> Icons.Filled.Warning
+        else -> Icons.AutoMirrored.Filled.List
+    }
+}
+
 @Composable
-private fun ErrorState(
-    kind: ErrorKind,
-    message: String,
-    onRetry: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun ErrorState(kind: ErrorKind, message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "Couldn't load mailboxes",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
+        Text("Couldn't load mailboxes", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
         Text(
             text = "${kind.name}: $message",
             style = MaterialTheme.typography.bodySmall,

@@ -1,11 +1,12 @@
 // ============================================================================
 // ui/theme/Color.kt  (UI group)
-// Material3 color schemes for ThunderCrab. Three dark variants are derived in
+// Material3 color schemes for ThunderCrab. Three variants are derived in
 // Theme.kt; this file holds the raw palettes:
 //   - LightColors   : standard Material3 light scheme
 //   - DarkColors    : conventional dark scheme (elevation grays)
 //   - AmoledColors  : OLED true-black dark default (background/surface = #000000)
-// No emoji, no business logic. AVP-2: UNVERIFIED.
+// Identity: Thunderbird's signature blue → cyan gradient, so ThunderCrab reads
+// as a member of the Thunderbird family at a glance. No emoji, no business logic.
 // ============================================================================
 package com.plausiden.thundercrab.ui.theme
 
@@ -13,41 +14,43 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
-// --- Brand seeds ------------------------------------------------------------
-// A restrained, premium teal/indigo pairing. Kept deliberately calm so the
-// AMOLED dark default reads as confident rather than neon.
-internal val CrabTeal = Color(0xFF4FD1C5)
-internal val CrabTealDark = Color(0xFF0D9488)
-internal val CrabIndigo = Color(0xFF6366F1)
-internal val CrabIndigoLight = Color(0xFFA5B4FC)
-internal val CrabAmber = Color(0xFFF59E0B)
+// --- Brand seeds (Thunderbird family) ---------------------------------------
+// Thunderbird's mark is a blue→cyan gradient. We anchor on the blue and use the
+// cyan as the secondary accent, mirroring the wordmark.
+internal val TbBlue = Color(0xFF1373D9)          // Thunderbird Blue 50 (primary, light)
+internal val TbBlueBright = Color(0xFF3B9DFF)    // brighter blue for dark surfaces
+internal val TbBlueDeep = Color(0xFF0B5BB5)      // pressed / container
+internal val TbCyan = Color(0xFF1AC2E8)          // gradient tail (secondary accent)
+internal val TbCyanLight = Color(0xFF7FE0F2)
+internal val TbAmber = Color(0xFFF59E0B)         // tertiary (flags/stars)
 internal val CrabRed = Color(0xFFEF4444)
 internal val CrabRedLight = Color(0xFFFCA5A5)
 
 // Elevation gray used ONLY where depth genuinely helps (non-AMOLED dark + bars).
-internal val Elevation01 = Color(0xFF121212)
-internal val Elevation02 = Color(0xFF1E1E1E)
+internal val Elevation01 = Color(0xFF121417)
+internal val Elevation02 = Color(0xFF1B1F24)
 internal val TrueBlack = Color(0xFF000000)
 
 // --- Light scheme (standard Material3 light) --------------------------------
 val LightColors = lightColorScheme(
-    primary = CrabTealDark,
+    primary = TbBlue,
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFB2F5EA),
-    onPrimaryContainer = Color(0xFF00201C),
-    secondary = CrabIndigo,
+    primaryContainer = Color(0xFFD6E7FF),
+    onPrimaryContainer = Color(0xFF001C3A),
+    secondary = Color(0xFF0E8FB0),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE0E7FF),
-    onSecondaryContainer = Color(0xFF1E1B4B),
-    tertiary = CrabAmber,
+    secondaryContainer = Color(0xFFC4ECF7),
+    onSecondaryContainer = Color(0xFF002731),
+    tertiary = TbAmber,
     onTertiary = Color(0xFF3E2900),
-    background = Color(0xFFFBFBFC),
-    onBackground = Color(0xFF1A1C1B),
-    surface = Color(0xFFFBFBFC),
-    onSurface = Color(0xFF1A1C1B),
-    surfaceVariant = Color(0xFFE6E9E8),
-    onSurfaceVariant = Color(0xFF424847),
-    outline = Color(0xFF727876),
+    background = Color(0xFFF8FAFC),
+    onBackground = Color(0xFF101418),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF101418),
+    surfaceVariant = Color(0xFFE2E8F0),
+    onSurfaceVariant = Color(0xFF44474C),
+    outline = Color(0xFF74777C),
+    outlineVariant = Color(0xFFCBD5E1),
     error = CrabRed,
     onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFFFEE2E2),
@@ -56,23 +59,24 @@ val LightColors = lightColorScheme(
 
 // --- Conventional dark scheme (elevation grays, not true black) -------------
 val DarkColors = darkColorScheme(
-    primary = CrabTeal,
-    onPrimary = Color(0xFF00382F),
-    primaryContainer = CrabTealDark,
-    onPrimaryContainer = Color(0xFFB2F5EA),
-    secondary = CrabIndigoLight,
-    onSecondary = Color(0xFF1E1B4B),
-    secondaryContainer = Color(0xFF3730A3),
-    onSecondaryContainer = Color(0xFFE0E7FF),
-    tertiary = CrabAmber,
+    primary = TbBlueBright,
+    onPrimary = Color(0xFF002A52),
+    primaryContainer = TbBlueDeep,
+    onPrimaryContainer = Color(0xFFD6E7FF),
+    secondary = TbCyanLight,
+    onSecondary = Color(0xFF00363F),
+    secondaryContainer = Color(0xFF034E5C),
+    onSecondaryContainer = Color(0xFFC4ECF7),
+    tertiary = TbAmber,
     onTertiary = Color(0xFF3E2900),
     background = Elevation01,
-    onBackground = Color(0xFFE3E3E1),
+    onBackground = Color(0xFFE3E7EB),
     surface = Elevation01,
-    onSurface = Color(0xFFE3E3E1),
+    onSurface = Color(0xFFE3E7EB),
     surfaceVariant = Elevation02,
-    onSurfaceVariant = Color(0xFFC4C7C5),
-    outline = Color(0xFF8C9290),
+    onSurfaceVariant = Color(0xFFC2C7CE),
+    outline = Color(0xFF8C9298),
+    outlineVariant = Color(0xFF2A2F36),
     error = CrabRedLight,
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
@@ -81,26 +85,26 @@ val DarkColors = darkColorScheme(
 
 // --- AMOLED true-black dark default -----------------------------------------
 // Background & surface are #000000 so OLED pixels are physically off
-// (battery + contrast doctrine). Elevation grays only on surfaceVariant where
-// depth genuinely helps (e.g. the top app bar).
+// (battery + contrast doctrine). Elevation grays only where depth helps.
 val AmoledColors = darkColorScheme(
-    primary = CrabTeal,
-    onPrimary = Color(0xFF00382F),
-    primaryContainer = CrabTealDark,
-    onPrimaryContainer = Color(0xFFB2F5EA),
-    secondary = CrabIndigoLight,
-    onSecondary = Color(0xFF1E1B4B),
-    secondaryContainer = Color(0xFF3730A3),
-    onSecondaryContainer = Color(0xFFE0E7FF),
-    tertiary = CrabAmber,
+    primary = TbBlueBright,
+    onPrimary = Color(0xFF002A52),
+    primaryContainer = TbBlueDeep,
+    onPrimaryContainer = Color(0xFFD6E7FF),
+    secondary = TbCyanLight,
+    onSecondary = Color(0xFF00363F),
+    secondaryContainer = Color(0xFF034E5C),
+    onSecondaryContainer = Color(0xFFC4ECF7),
+    tertiary = TbAmber,
     onTertiary = Color(0xFF3E2900),
     background = TrueBlack,
     onBackground = Color(0xFFE6E6E6),
     surface = TrueBlack,
     onSurface = Color(0xFFE6E6E6),
     surfaceVariant = Elevation01,
-    onSurfaceVariant = Color(0xFFB8BCBA),
-    outline = Color(0xFF6B716F),
+    onSurfaceVariant = Color(0xFFB8BCC2),
+    outline = Color(0xFF6B7177),
+    outlineVariant = Color(0xFF1B1F24),
     error = CrabRedLight,
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF5C0006),

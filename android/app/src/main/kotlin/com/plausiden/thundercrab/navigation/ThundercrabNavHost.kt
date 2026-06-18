@@ -47,7 +47,9 @@ fun ThundercrabNavHost() {
             AccountSetupScreen(
                 viewModel = vm,
                 onConnected = {
-                    navController.navigate(Destinations.FOLDERS) {
+                    // Home is the INBOX message list (Thunderbird-style), with the
+                    // mailbox list one Menu tap away — not a folder list first.
+                    navController.navigate(Destinations.messages("INBOX")) {
                         popUpTo(Destinations.SETUP) { inclusive = true }
                     }
                 },
@@ -61,11 +63,14 @@ fun ThundercrabNavHost() {
             FolderListScreen(
                 viewModel = vm,
                 onFolderClick = { folderName ->
-                    navController.navigate(Destinations.messages(folderName))
+                    navController.navigate(Destinations.messages(folderName)) {
+                        launchSingleTop = true
+                    }
                 },
                 onOpenSuggestions = {
                     navController.navigate(Destinations.SUGGESTIONS)
                 },
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -92,7 +97,12 @@ fun ThundercrabNavHost() {
                 viewModel(factory = MessageListViewModel.factory(repository, folder))
             MessageListScreen(
                 viewModel = vm,
-                onBack = { navController.popBackStack() },
+                onOpenFolders = {
+                    navController.navigate(Destinations.FOLDERS) {
+                        launchSingleTop = true
+                        popUpTo(Destinations.FOLDERS)
+                    }
+                },
                 onMessageClick = { uid ->
                     navController.navigate(Destinations.read(folder, uid))
                 },
