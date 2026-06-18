@@ -83,9 +83,7 @@ impl RustImapBackend {
     ) -> Result<Self, BackendError> {
         let host = config.imap_host.as_str();
         let port = config.imap_port;
-        let tcp = TcpStream::connect((host, port))
-            .await
-            .map_err(|e| BackendError::Transport(format!("tcp connect: {e}")))?;
+        let tcp = crate::connect_with_timeout(host, port, crate::CONNECT_TIMEOUT).await?;
 
         let connector = TlsConnector::from(Arc::new(tls_config()));
         let server_name = ServerName::try_from(host.to_string())

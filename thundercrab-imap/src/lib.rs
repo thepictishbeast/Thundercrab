@@ -38,6 +38,45 @@ pub enum BackendError {
     NotImplemented(&'static str),
 }
 
+/// Default TCP-connect timeout for the mail backends. A mobile client must not
+/// hang on an unreachable / hung server (flaky networks, captive portals);
+/// without a bound, `TcpStream::connect` blocks until the OS TCP timeout
+/// (often minutes).
+pub(crate) const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// TCP-connect to `host:port`, bounded by `timeout`. Both a timeout and a
+/// connect error map to [`BackendError::Transport`], so callers never block
+/// indefinitely on a dead endpoint.
+pub(crate) async fn connect_with_timeout(
+    host: &str,
+    port: u16,
+    timeout: std::time::Duration,
+) -> Result<tokio::net::TcpStream, BackendError> {
+    tokio::time::timeout(timeout, tokio::net::TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| {
+            BackendError::Transport(format!("tcp connect to {host}:{port} timed out after {timeout:?}"))
+        })?
+        .map_err(|e| BackendError::Transport(format!("tcp connect: {e}")))
+}
+
+#[cfg(test)]
+mod connect_timeout_tests {
+    use super::{connect_with_timeout, BackendError};
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn connect_fails_fast_never_hangs() {
+        // 192.0.2.1 is TEST-NET-1 (RFC 5737) — non-routable. The connect must
+        // return a Transport error promptly (via the timeout, or an immediate
+        // network error), never hang.
+        let start = Instant::now();
+        let r = connect_with_timeout("192.0.2.1", 9, Duration::from_millis(800)).await;
+        assert!(matches!(r, Err(BackendError::Transport(_))), "expected Transport err, got {r:?}");
+        assert!(start.elapsed() < Duration::from_secs(5), "connect must not hang");
+    }
+}
+
 /// Server connection parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountConfig {

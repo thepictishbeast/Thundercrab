@@ -40,7 +40,6 @@ use std::sync::Arc;
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::ServerName;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
 use crate::{AccountConfig, BackendError};
@@ -66,9 +65,7 @@ pub async fn put_active_script(
     let host = cfg.imap_host.as_str();
     let port = cfg.sieve_port;
 
-    let tcp = TcpStream::connect((host, port))
-        .await
-        .map_err(|e| BackendError::Transport(format!("tcp connect: {e}")))?;
+    let tcp = crate::connect_with_timeout(host, port, crate::CONNECT_TIMEOUT).await?;
     let mut stream = BufReader::new(tcp);
 
     // Greeting: capabilities then OK. We ignore capability content
