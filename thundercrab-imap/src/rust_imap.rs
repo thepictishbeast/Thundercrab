@@ -264,8 +264,22 @@ impl Backend for RustImapBackend {
             .map_err(|e| BackendError::Protocol(format!("fetch {folder} {range}: {e}")))?;
 
         let mut out = Vec::new();
+        let mut skipped = 0u64;
         while let Some(item) = stream.next().await {
-            let f = item.map_err(|e| BackendError::Protocol(format!("fetch item: {e}")))?;
+            // CRITICAL: one message async-imap cannot parse (a malformed
+            // ENVELOPE, an exotic header encoding, a server quirk) must NOT
+            // sink the entire folder load — that is exactly what produces a
+            // "can't load messages" on an otherwise-fine mailbox. Skip the
+            // bad item, log it, and keep going (same resilience as
+            // `list_folders`).
+            let f = match item {
+                Ok(f) => f,
+                Err(e) => {
+                    skipped += 1;
+                    tracing::warn!(folder = %folder, error = %e, "skipping unparseable message");
+                    continue;
+                }
+            };
             let uid = f.uid.unwrap_or(0);
             let envelope = f.envelope();
             let from = envelope
@@ -299,6 +313,14 @@ impl Backend for RustImapBackend {
                 subject,
                 other_headers,
             });
+        }
+        if skipped > 0 {
+            tracing::info!(
+                folder = %folder,
+                fetched = out.len(),
+                skipped,
+                "fetched headers; some messages were unparseable and skipped"
+            );
         }
         Ok(out)
     }
