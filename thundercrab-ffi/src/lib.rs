@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone as _, Utc};
 use thundercrab_core::{
-    Action, CrabRule, Db, FlagEvent, FlagSource, MatchExpr, RuleOrigin,
+    Action, CrabRule, Db, FlagEvent, FlagSource, MatchExpr, RuleOrigin, to_sieve,
 };
 use thundercrab_imap::rust_imap::RustImapBackend;
 use thundercrab_imap::smtp::{self, OutboundMessage, SmtpEncryption};
@@ -516,6 +516,25 @@ pub fn load_rules(db_path: String) -> Result<Vec<FfiCrabRule>, FfiError> {
 #[uniffi::export]
 pub fn delete_rule(db_path: String, id: String) -> Result<bool, FfiError> {
     with_db(&db_path, |db| Ok(db.delete_rule(&id)?))
+}
+
+/// Render `rules` into a complete personal Sieve script (RFC 5228) ready for
+/// [`push_sieve`]. Pure + blocking; performs no I/O.
+///
+/// The result is a *personal* active script that layers on top of the server's
+/// global `sieve_before` (it does not replace server-side category sorting). The
+/// emitter is validated against Dovecot's `sievec` in `thundercrab-core`.
+///
+/// SECURITY: emits only header / Subject / From-domain tests + fileinto/setflag
+/// actions; the rule AST has no body-touching variant.
+///
+/// # Errors
+/// `InvalidInput` if any rule's `when_json` / `action_json` is malformed.
+#[uniffi::export]
+pub fn rules_to_sieve(rules: Vec<FfiCrabRule>) -> Result<String, FfiError> {
+    let core: Vec<CrabRule> =
+        rules.iter().map(CrabRule::try_from).collect::<Result<_, _>>()?;
+    Ok(to_sieve(&core))
 }
 
 /// Read-only preview of derived rule suggestions: derives candidates from the

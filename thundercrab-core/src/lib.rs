@@ -19,7 +19,9 @@
 pub mod crab_rule;
 pub mod db;
 pub mod flag_event;
+pub mod sieve;
 
 pub use crab_rule::{Action, CrabRule, MatchExpr, RuleOrigin};
 pub use db::{Db, DbError};
 pub use flag_event::{FlagEvent, FlagSource};
+pub use sieve::to_sieve;
