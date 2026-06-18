@@ -392,6 +392,43 @@ impl Backend for RustImapBackend {
             "put_sieve: call thundercrab_imap::managesieve::put_active_script directly",
         ))
     }
+
+    async fn create_folder(&self, name: &str) -> Result<(), BackendError> {
+        let mut session = self.session.lock().await;
+        session
+            .create(name)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("create {name}: {e}")))
+    }
+
+    async fn rename_folder(&self, from: &str, to: &str) -> Result<(), BackendError> {
+        let mut session = self.session.lock().await;
+        session
+            .rename(from, to)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("rename {from} -> {to}: {e}")))
+    }
+
+    async fn delete_folder(&self, name: &str) -> Result<(), BackendError> {
+        let mut session = self.session.lock().await;
+        session
+            .delete(name)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("delete {name}: {e}")))
+    }
+
+    async fn set_subscribed(&self, name: &str, subscribed: bool) -> Result<(), BackendError> {
+        let mut session = self.session.lock().await;
+        let result = if subscribed {
+            session.subscribe(name).await
+        } else {
+            session.unsubscribe(name).await
+        };
+        result.map_err(|e| {
+            let verb = if subscribed { "subscribe" } else { "unsubscribe" };
+            BackendError::Protocol(format!("{verb} {name}: {e}"))
+        })
+    }
 }
 
 /// Parse a raw RFC822 header block into `(lowercased-name, value)`

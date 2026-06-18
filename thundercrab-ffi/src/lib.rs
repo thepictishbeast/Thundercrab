@@ -1028,6 +1028,103 @@ impl ThunderCrabClient {
         .await
     }
 
+    /// Create a new mailbox (graphical "add folder"). `name` is the full
+    /// server path with the server's hierarchy separator.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn create_folder(&self, name: String) -> Result<(), FfiError> {
+        timed(
+            "create_folder",
+            DiagKind::FolderMutateOk,
+            DiagKind::FolderMutateFail,
+            |_: &()| 0,
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                tokio::time::timeout(OP_TIMEOUT, backend.create_folder(&name))
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "create_folder timed out".to_string(),
+                    })??;
+                Ok(())
+            },
+        )
+        .await
+    }
+
+    /// Rename / move a mailbox.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn rename_folder(&self, from: String, to: String) -> Result<(), FfiError> {
+        timed(
+            "rename_folder",
+            DiagKind::FolderMutateOk,
+            DiagKind::FolderMutateFail,
+            |_: &()| 0,
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                tokio::time::timeout(OP_TIMEOUT, backend.rename_folder(&from, &to))
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "rename_folder timed out".to_string(),
+                    })??;
+                Ok(())
+            },
+        )
+        .await
+    }
+
+    /// Delete a mailbox. The UI is responsible for confirming first.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn delete_folder(&self, name: String) -> Result<(), FfiError> {
+        timed(
+            "delete_folder",
+            DiagKind::FolderMutateOk,
+            DiagKind::FolderMutateFail,
+            |_: &()| 0,
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                tokio::time::timeout(OP_TIMEOUT, backend.delete_folder(&name))
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "delete_folder timed out".to_string(),
+                    })??;
+                Ok(())
+            },
+        )
+        .await
+    }
+
+    /// Subscribe (`true`) or unsubscribe (`false`) a mailbox.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn set_subscribed(&self, name: String, subscribed: bool) -> Result<(), FfiError> {
+        timed(
+            "set_subscribed",
+            DiagKind::FolderMutateOk,
+            DiagKind::FolderMutateFail,
+            |_: &()| 0,
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                tokio::time::timeout(OP_TIMEOUT, backend.set_subscribed(&name, subscribed))
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "set_subscribed timed out".to_string(),
+                    })??;
+                Ok(())
+            },
+        )
+        .await
+    }
+
     /// Fetch a message body. NOT IMPLEMENTED: `thundercrab-imap` exposes no
     /// body-reading method, and adding one (a `BODY.PEEK[]` fetch + a MIME
     /// parser) is a display-only carve-out gated on explicit ratification and

@@ -192,6 +192,32 @@ pub trait Backend: Send + Sync {
         &self,
         script: &str,
     ) -> impl Future<Output = Result<(), BackendError>> + Send;
+
+    /// Create a new mailbox (IMAP `CREATE`). `name` is the full server-side
+    /// path (e.g. `Archive/2026` with the server's hierarchy separator).
+    fn create_folder(&self, name: &str)
+    -> impl Future<Output = Result<(), BackendError>> + Send;
+
+    /// Rename / move a mailbox (IMAP `RENAME`). Renaming a parent moves its
+    /// children, per RFC 3501.
+    fn rename_folder(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> impl Future<Output = Result<(), BackendError>> + Send;
+
+    /// Delete a mailbox (IMAP `DELETE`). The caller is responsible for any
+    /// confirmation; this performs the deletion unconditionally.
+    fn delete_folder(&self, name: &str)
+    -> impl Future<Output = Result<(), BackendError>> + Send;
+
+    /// Subscribe (`true`) or unsubscribe (`false`) a mailbox so it appears in
+    /// the user's subscribed view (IMAP `SUBSCRIBE` / `UNSUBSCRIBE`).
+    fn set_subscribed(
+        &self,
+        name: &str,
+        subscribed: bool,
+    ) -> impl Future<Output = Result<(), BackendError>> + Send;
 }
 
 #[cfg(test)]

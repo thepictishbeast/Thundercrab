@@ -94,6 +94,10 @@ pub enum DiagKind {
     /// out) — distinct from [`DiagKind::ListFoldersDegraded`], where the
     /// list succeeded but some folders were unusable.
     ListFoldersFail = 16,
+    /// A folder mutation (create / rename / delete / subscribe) succeeded.
+    FolderMutateOk = 17,
+    /// A folder mutation failed.
+    FolderMutateFail = 18,
 }
 
 /// Coarse error family, derived from a `BackendError` *without* its
@@ -169,8 +173,7 @@ impl DiagEvent {
 fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Maximum events retained in memory. Older events are evicted FIFO.
