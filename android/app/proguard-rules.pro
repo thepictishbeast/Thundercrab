@@ -10,3 +10,11 @@
 
 # Generated UniFFI surface for thundercrab-ffi.
 -keep class uniffi.thundercrab_ffi.** { *; }
+
+# JNA ships optional desktop integration (Native$AWT.getWindowID) that references
+# java.awt.*/javax.swing.* — JDK-only classes absent on Android. They are never
+# reached at runtime, but R8 fails the build on the dangling references unless we
+# tell it to ignore them. Standard JNA-on-Android suppression.
+-dontwarn java.awt.**
+-dontwarn javax.swing.**
+-dontwarn com.sun.jna.**
