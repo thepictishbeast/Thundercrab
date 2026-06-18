@@ -18,7 +18,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 // The ONE import block of the generated surface, isolated to this file:
 import uniffi.thundercrab_ffi.FfiAccountConfig
 import uniffi.thundercrab_ffi.FfiCrabRule
@@ -216,37 +215,8 @@ class ThunderCrabRepositoryImpl(
     private fun FfiCrabRule.toDomain() = RuleSuggestion(
         id = id,
         displayName = displayName,
-        summary = summarize(actionJson, displayName),
+        summary = summarizeRuleAction(actionJson, displayName), // pure helper in RuleSummary.kt
     )
-
-    /**
-     * Derive a short human summary from a rule's canonical Action JSON
-     * (serde-tagged `{"kind":..}`, snake_case — see thundercrab-core crab_rule.rs).
-     * Falls back to [fallback] (the display name) on any parse failure.
-     *   file_into -> "Move to <folder>"
-     *   set_flag  -> "Flag as <flag>"
-     *   sequence  -> the first action's summary (+ "…" if more follow)
-     */
-    private fun summarize(actionJson: String, fallback: String): String = try {
-        summarizeAction(JSONObject(actionJson)) ?: fallback
-    } catch (_: Exception) {
-        fallback
-    }
-
-    private fun summarizeAction(obj: JSONObject): String? = when (obj.optString("kind")) {
-        "file_into" -> obj.optString("folder").takeIf { it.isNotBlank() }?.let { "Move to $it" }
-        "set_flag" -> obj.optString("flag").takeIf { it.isNotBlank() }?.let { "Flag as $it" }
-        "sequence" -> {
-            val actions = obj.optJSONArray("actions")
-            val first = actions?.takeIf { it.length() > 0 }?.optJSONObject(0)?.let { summarizeAction(it) }
-            when {
-                first == null -> null
-                (actions?.length() ?: 0) > 1 -> "$first …"
-                else -> first
-            }
-        }
-        else -> null
-    }
 
     private fun FfiHeaders.toDomain() = MessageHeader(
         uid = uid.toInt(), folder = folder, from = from, subject = subject,

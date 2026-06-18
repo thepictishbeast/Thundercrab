@@ -109,6 +109,8 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Real org.json for JVM unit tests (the android.jar one is a throwing stub).
+    testImplementation("org.json:json:20240303")
 
     // On-device (instrumented) test: proves the Rust .so loads + executes through
     // JNA on a real Android runtime — the one thing compile/sign cannot verify.
