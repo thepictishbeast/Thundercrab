@@ -18,6 +18,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.plausiden.thundercrab.data.AppPrefs
 import com.plausiden.thundercrab.data.ThemeMode
 import com.plausiden.thundercrab.navigation.ThundercrabNavHost
@@ -63,6 +65,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Flush buffered diagnostics to the home endpoint when backgrounding
+     *  (best-effort; no-op when telemetry is off). */
+    override fun onStop() {
+        super.onStop()
+        val repo = (application as ThundercrabApplication).container.repository
+        lifecycleScope.launch { repo.uploadDiagnostics() }
     }
 }
 

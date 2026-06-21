@@ -91,6 +91,13 @@ interface ThunderCrabRepository {
     /** Discard all buffered diagnostic events. */
     fun clearDiagnostics()
 
+    /**
+     * Best-effort upload of buffered diagnostics to the home endpoint (debug
+     * builds). No-op when telemetry is disabled or there's nothing to send.
+     * Clears the buffer on success. PII-free payload (see docs/TELEMETRY.md).
+     */
+    suspend fun uploadDiagnostics(): Result<Unit>
+
     /** Best-effort logout (drops IMAP session) + close()/destroy() of the Rust handle. */
     suspend fun disconnect()
 

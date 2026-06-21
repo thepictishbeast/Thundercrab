@@ -34,6 +34,7 @@ import uniffi.thundercrab_ffi.ThunderCrabClient
 import uniffi.thundercrab_ffi.connect as ffiConnect
 import uniffi.thundercrab_ffi.deleteRule as ffiDeleteRule
 import uniffi.thundercrab_ffi.diagnosticsClear
+import uniffi.thundercrab_ffi.diagnosticsJson
 import uniffi.thundercrab_ffi.diagnosticsSnapshot
 import uniffi.thundercrab_ffi.telemetryIsEnabled
 import uniffi.thundercrab_ffi.telemetrySetEnabled
@@ -55,6 +56,12 @@ import uniffi.thundercrab_ffi.saveRule as ffiSaveRule
  * The dbPath SQLite store holds only rules + features-only flag events — no
  * bodies, no passwords (spec §5.2).
  */
+// Diagnostics home endpoint (debug builds). Write-only + bearer-gated: the token
+// only permits appending to a server log (nothing is readable through it), and
+// the payload is PII-free by construction (see docs/TELEMETRY.md).
+private const val DIAG_URL = "https://dev.plausiden.com/thundercrab/diag"
+private const val DIAG_TOKEN = "594b4bac7780f83746b98a0b92dce8cf3459d4f5d43d2f5d99af37bd7b9d91cb"
+
 class ThunderCrabRepositoryImpl(
     private val dbPath: String,
 ) : ThunderCrabRepository {
@@ -145,6 +152,34 @@ class ThunderCrabRepositoryImpl(
     override fun setTelemetryEnabled(on: Boolean) = telemetrySetEnabled(on)
     override fun diagnostics(): List<DiagEvent> = diagnosticsSnapshot().map { it.toDomain() }
     override fun clearDiagnostics() = diagnosticsClear()
+
+    override suspend fun uploadDiagnostics(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!telemetryIsEnabled()) return@withContext Result.success(Unit)
+        val json = diagnosticsJson()
+        if (json == "[]" || json.isBlank()) return@withContext Result.success(Unit)
+        try {
+            val conn = (java.net.URL(DIAG_URL).openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Authorization", "Bearer $DIAG_TOKEN")
+                setRequestProperty("Content-Type", "application/json")
+                doOutput = true
+                connectTimeout = 8000
+                readTimeout = 8000
+            }
+            conn.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            conn.disconnect()
+            if (code in 200..299) {
+                diagnosticsClear()       // don't re-send what we shipped
+                Result.success(Unit)
+            } else {
+                Result.failure(RepositoryError(ErrorKind.TRANSPORT, "diag upload HTTP $code"))
+            }
+        } catch (e: Exception) {
+            // Telemetry must never disrupt the user — failures are swallowed upstream.
+            Result.failure(RepositoryError(ErrorKind.TRANSPORT, e.message ?: "diag upload failed"))
+        }
+    }
 
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
         clientLock.withLock {
