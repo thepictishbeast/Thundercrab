@@ -9,6 +9,7 @@ package com.plausiden.thundercrab.data
 
 import com.plausiden.thundercrab.data.model.AccountDraft
 import com.plausiden.thundercrab.data.model.ConnectResult
+import com.plausiden.thundercrab.data.model.DiagEvent
 import com.plausiden.thundercrab.data.model.Folder
 import com.plausiden.thundercrab.data.model.MessageHeader
 import com.plausiden.thundercrab.data.model.RuleSuggestion
@@ -67,6 +68,20 @@ interface ThunderCrabRepository {
 
     /** Subscribe (true) / unsubscribe (false) a mailbox. */
     suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit>
+
+    // --- Diagnostics / telemetry (on-device, PII-free; see docs/TELEMETRY.md) -
+
+    /** Whether on-device diagnostics collection is currently enabled. */
+    fun telemetryEnabled(): Boolean
+
+    /** Master switch for diagnostics collection (off = nothing recorded/sent). */
+    fun setTelemetryEnabled(on: Boolean)
+
+    /** Snapshot of recent diagnostic events (enumerated, PII-free). */
+    fun diagnostics(): List<DiagEvent>
+
+    /** Discard all buffered diagnostic events. */
+    fun clearDiagnostics()
 
     /** Best-effort logout (drops IMAP session) + close()/destroy() of the Rust handle. */
     suspend fun disconnect()

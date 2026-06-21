@@ -9,6 +9,7 @@ package com.plausiden.thundercrab.data
 
 import com.plausiden.thundercrab.data.model.AccountDraft
 import com.plausiden.thundercrab.data.model.ConnectResult
+import com.plausiden.thundercrab.data.model.DiagEvent
 import com.plausiden.thundercrab.data.model.ErrorKind
 import com.plausiden.thundercrab.data.model.Folder
 import com.plausiden.thundercrab.data.model.MessageHeader
@@ -22,6 +23,7 @@ import kotlinx.coroutines.withContext
 import uniffi.thundercrab_ffi.FfiAccountConfig
 import uniffi.thundercrab_ffi.FfiCryptoMode
 import uniffi.thundercrab_ffi.FfiCrabRule
+import uniffi.thundercrab_ffi.FfiDiagEvent
 import uniffi.thundercrab_ffi.FfiException
 import uniffi.thundercrab_ffi.FfiFlagEvent
 import uniffi.thundercrab_ffi.FfiFlagSource
@@ -31,6 +33,10 @@ import uniffi.thundercrab_ffi.FfiRuleOrigin
 import uniffi.thundercrab_ffi.ThunderCrabClient
 import uniffi.thundercrab_ffi.connect as ffiConnect
 import uniffi.thundercrab_ffi.deleteRule as ffiDeleteRule
+import uniffi.thundercrab_ffi.diagnosticsClear
+import uniffi.thundercrab_ffi.diagnosticsSnapshot
+import uniffi.thundercrab_ffi.telemetryIsEnabled
+import uniffi.thundercrab_ffi.telemetrySetEnabled
 import uniffi.thundercrab_ffi.loadRules as ffiLoadRules
 import uniffi.thundercrab_ffi.plausidenAccountConfig
 import uniffi.thundercrab_ffi.previewSuggestions as ffiPreviewSuggestions
@@ -134,6 +140,12 @@ class ThunderCrabRepositoryImpl(
     override suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit> =
         guarded { c -> c.setSubscribed(name, subscribed) }
 
+    // --- Diagnostics / telemetry (synchronous in-memory FFI; no IMAP needed) --
+    override fun telemetryEnabled(): Boolean = telemetryIsEnabled()
+    override fun setTelemetryEnabled(on: Boolean) = telemetrySetEnabled(on)
+    override fun diagnostics(): List<DiagEvent> = diagnosticsSnapshot().map { it.toDomain() }
+    override fun clearDiagnostics() = diagnosticsClear()
+
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
         clientLock.withLock {
             client?.let { c ->
@@ -224,6 +236,17 @@ class ThunderCrabRepositoryImpl(
     // --- Ffi* -> domain mappers (the firewall) -------------------------------
     private fun FfiFolder.toDomain() =
         Folder(name = name, specialUse = specialUse, messages = messages.toLong(), unseen = unseen.toLong())
+
+    private fun FfiDiagEvent.toDomain() = DiagEvent(
+        kind = kind,
+        category = category,
+        code = code.toInt(),
+        op = op,
+        count = count.toLong(),
+        extra = extra.toLong(),
+        durationMs = durationMs.toLong(),
+        atUnixMs = atUnixMs.toLong(),
+    )
 
     private fun FfiCrabRule.toDomain() = RuleSuggestion(
         id = id,

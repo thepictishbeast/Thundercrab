@@ -71,7 +71,7 @@ import com.plausiden.thundercrab.data.model.Folder
 fun FolderListScreen(
     viewModel: FolderListViewModel,
     onFolderClick: (String) -> Unit,
-    onOpenSuggestions: () -> Unit,
+    onOpenSettings: () -> Unit,
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -99,8 +99,8 @@ fun FolderListScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenSuggestions) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Rule suggestions")
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

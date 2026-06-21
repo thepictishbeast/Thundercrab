@@ -14,6 +14,7 @@ object Destinations {
     const val SETUP = "setup"
     const val FOLDERS = "folders"
     const val SUGGESTIONS = "suggestions"
+    const val SETTINGS = "settings"
 
     // Arg keys.
     const val ARG_FOLDER = "folder"

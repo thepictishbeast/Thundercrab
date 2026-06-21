@@ -67,9 +67,25 @@ fun ThundercrabNavHost() {
                         launchSingleTop = true
                     }
                 },
-                onOpenSuggestions = {
-                    navController.navigate(Destinations.SUGGESTIONS)
+                onOpenSettings = {
+                    navController.navigate(Destinations.SETTINGS)
                 },
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        // 2c. Settings ---------------------------------------------------------
+        composable(Destinations.SETTINGS) {
+            val vm: com.plausiden.thundercrab.feature.settings.SettingsViewModel =
+                viewModel(
+                    factory = com.plausiden.thundercrab.feature.settings.SettingsViewModel.factory(
+                        repository,
+                        container.prefs,
+                    ),
+                )
+            com.plausiden.thundercrab.feature.settings.SettingsScreen(
+                viewModel = vm,
+                onOpenSuggestions = { navController.navigate(Destinations.SUGGESTIONS) },
                 onBack = { navController.popBackStack() },
             )
         }

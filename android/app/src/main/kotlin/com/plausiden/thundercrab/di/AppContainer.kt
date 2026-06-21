@@ -11,6 +11,7 @@
 package com.plausiden.thundercrab.di
 
 import android.content.Context
+import com.plausiden.thundercrab.data.AppPrefs
 import com.plausiden.thundercrab.data.ThunderCrabRepository
 import com.plausiden.thundercrab.data.ThunderCrabRepositoryImpl
 
@@ -28,4 +29,7 @@ class AppContainer(context: Context) {
 
     /** The app's single Repository instance. ViewModels receive this via factories. */
     val repository: ThunderCrabRepository = ThunderCrabRepositoryImpl(dbPath)
+
+    /** On-device appearance + diagnostics-consent prefs (drives live re-theming). */
+    val prefs: AppPrefs = AppPrefs(context)
 }
