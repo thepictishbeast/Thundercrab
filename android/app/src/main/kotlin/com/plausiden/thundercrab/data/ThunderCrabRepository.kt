@@ -54,6 +54,20 @@ interface ThunderCrabRepository {
      */
     suspend fun moveMessage(fromFolder: String, toFolder: String, uid: Int): Result<Unit>
 
+    // --- Folder management (IMAP CREATE/RENAME/DELETE/SUBSCRIBE) --------------
+
+    /** Create a mailbox. `name` is the full server path (server hierarchy separator). */
+    suspend fun createFolder(name: String): Result<Unit>
+
+    /** Rename / move a mailbox (renaming a parent moves its children). */
+    suspend fun renameFolder(from: String, to: String): Result<Unit>
+
+    /** Delete a mailbox. The caller is responsible for confirming first. */
+    suspend fun deleteFolder(name: String): Result<Unit>
+
+    /** Subscribe (true) / unsubscribe (false) a mailbox. */
+    suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit>
+
     /** Best-effort logout (drops IMAP session) + close()/destroy() of the Rust handle. */
     suspend fun disconnect()
 

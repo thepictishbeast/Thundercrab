@@ -26,6 +26,10 @@ class FolderListViewModel(
     private val _uiState = MutableStateFlow<FolderListUiState>(FolderListUiState.Loading)
     val uiState: StateFlow<FolderListUiState> = _uiState.asStateFlow()
 
+    // Transient one-shot message for folder-management action results (snackbar).
+    private val _action = MutableStateFlow<String?>(null)
+    val action: StateFlow<String?> = _action.asStateFlow()
+
     init {
         refresh()
     }
@@ -39,6 +43,33 @@ class FolderListViewModel(
                     val kind = (e as? RepositoryError)?.kind ?: ErrorKind.UNKNOWN
                     val message = e.message ?: "Failed to load folders."
                     _uiState.value = FolderListUiState.Error(kind, message)
+                },
+            )
+        }
+    }
+
+    fun createFolder(name: String) = runFolderOp("Mailbox created") { repo.createFolder(name) }
+
+    fun renameFolder(from: String, to: String) =
+        runFolderOp("Mailbox renamed") { repo.renameFolder(from, to) }
+
+    fun deleteFolder(name: String) = runFolderOp("Mailbox deleted") { repo.deleteFolder(name) }
+
+    fun consumeAction() {
+        _action.value = null
+    }
+
+    /** Run a folder mutation, then refetch on success (the authoritative view) or
+     *  surface the error to the snackbar. */
+    private fun runFolderOp(successMsg: String, op: suspend () -> Result<Unit>) {
+        viewModelScope.launch {
+            op().fold(
+                onSuccess = {
+                    _action.value = successMsg
+                    refresh()
+                },
+                onFailure = { e ->
+                    _action.value = e.message ?: "Operation failed."
                 },
             )
         }

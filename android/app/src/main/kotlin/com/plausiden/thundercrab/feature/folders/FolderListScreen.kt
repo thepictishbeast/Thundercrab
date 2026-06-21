@@ -1,8 +1,10 @@
 // ============================================================================
 // feature/folders/FolderListScreen.kt  (UI group)
-// Mailbox list — reached from the inbox via the Menu icon. Thunderbird-style:
-// a branded header, then rows with a special-use icon, name, count, and an
-// unread badge. Tapping a row navigates to messages/{folder}. AVP-2: UNVERIFIED.
+// Mailbox list + management. Reached from the inbox via the Menu icon.
+// Thunderbird-style: branded header, rows with a special-use icon, name, count,
+// and an unread badge. A New-folder FAB creates mailboxes; a per-row overflow
+// renames/deletes them (IMAP CREATE/RENAME/DELETE via the Repository). INBOX and
+// special-use folders are protected from rename/delete. AVP-2: UNVERIFIED.
 // ============================================================================
 package com.plausiden.thundercrab.feature.folders
 
@@ -21,25 +23,39 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -59,6 +75,19 @@ fun FolderListScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val action by viewModel.action.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var showCreate by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<Folder?>(null) }
+    var deleteTarget by remember { mutableStateOf<Folder?>(null) }
+
+    LaunchedEffect(action) {
+        action?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeAction()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -81,6 +110,12 @@ fun FolderListScreen(
                 ),
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showCreate = true }) {
+                Icon(Icons.Filled.Add, contentDescription = "New mailbox")
+            }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -110,7 +145,12 @@ fun FolderListScreen(
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             item { MailboxesHeader(count = s.folders.size, unread = s.folders.sumOf { it.unseen }) }
                             items(items = s.folders, key = { it.name }) { folder ->
-                                FolderRow(folder = folder, onClick = { onFolderClick(folder.name) })
+                                FolderRow(
+                                    folder = folder,
+                                    onClick = { onFolderClick(folder.name) },
+                                    onRename = { renameTarget = folder },
+                                    onDelete = { deleteTarget = folder },
+                                )
                                 HorizontalDivider(
                                     color = MaterialTheme.colorScheme.outlineVariant,
                                     thickness = 0.5.dp,
@@ -122,6 +162,45 @@ fun FolderListScreen(
                 }
             }
         }
+    }
+
+    if (showCreate) {
+        FolderNameDialog(
+            title = "New mailbox",
+            label = "Mailbox name",
+            initial = "",
+            confirmText = "Create",
+            onDismiss = { showCreate = false },
+            onConfirm = { name -> showCreate = false; viewModel.createFolder(name) },
+        )
+    }
+    renameTarget?.let { f ->
+        FolderNameDialog(
+            title = "Rename mailbox",
+            label = "New name",
+            initial = f.name,
+            confirmText = "Rename",
+            onDismiss = { renameTarget = null },
+            onConfirm = { newName -> renameTarget = null; viewModel.renameFolder(f.name, newName) },
+        )
+    }
+    deleteTarget?.let { f ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete mailbox?") },
+            text = {
+                Text(
+                    "Delete \"${f.name}\"" +
+                        if (f.messages > 0) " and its ${f.messages} message(s)? This cannot be undone." else "?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { deleteTarget = null; viewModel.deleteFolder(f.name) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -150,12 +229,20 @@ private fun MailboxesHeader(count: Int, unread: Long) {
 }
 
 @Composable
-private fun FolderRow(folder: Folder, onClick: () -> Unit) {
+private fun FolderRow(
+    folder: Folder,
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val protected = isProtected(folder)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(start = 20.dp, end = 4.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
@@ -182,8 +269,60 @@ private fun FolderRow(folder: Folder, onClick: () -> Unit) {
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ) { Text(folder.unseen.toString()) }
         }
+        // Management overflow — hidden for protected (INBOX / special-use) folders.
+        if (!protected) {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "Mailbox actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menuExpanded = false; onRename() })
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menuExpanded = false; onDelete() })
+                }
+            }
+        }
     }
 }
+
+@Composable
+private fun FolderNameDialog(
+    title: String,
+    label: String,
+    initial: String,
+    confirmText: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(label) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim()) },
+                enabled = name.isNotBlank() && name.trim() != initial,
+            ) { Text(confirmText) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** INBOX and special-use mailboxes are protected from rename/delete. */
+private fun isProtected(folder: Folder): Boolean =
+    folder.name.equals("INBOX", ignoreCase = true) || !folder.specialUse.isNullOrBlank()
 
 /** Map a folder to a core Material icon by special-use marker / name. */
 private fun folderIcon(folder: Folder): ImageVector {

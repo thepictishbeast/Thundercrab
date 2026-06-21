@@ -122,6 +122,18 @@ class ThunderCrabRepositoryImpl(
             recordEvent(fromFolder, uid, FfiFlagSource.MANUAL_MOVE, destination = toFolder)
         }
 
+    override suspend fun createFolder(name: String): Result<Unit> =
+        guarded { c -> c.createFolder(name) }
+
+    override suspend fun renameFolder(from: String, to: String): Result<Unit> =
+        guarded { c -> c.renameFolder(from, to) }
+
+    override suspend fun deleteFolder(name: String): Result<Unit> =
+        guarded { c -> c.deleteFolder(name) }
+
+    override suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit> =
+        guarded { c -> c.setSubscribed(name, subscribed) }
+
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
         clientLock.withLock {
             client?.let { c ->
