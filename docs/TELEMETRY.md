@@ -96,26 +96,28 @@ would be sent. With the master switch off, the buffer stays empty.
 
 ---
 
-## 5. Transmission ("phone home") — status: NOT YET DEPLOYED
+## 5. Transmission ("phone home") — status: DEPLOYED (debug builds)
 
-The on-device tiers above ship first and need no server. Auto-upload is a
-separate, opt-in step that stands up new outward-facing infrastructure on
-`prime`, so it is gated on explicit owner sign-off.
+Owner-approved and live as of 2026-06-21.
 
-**Planned channel (minimal, per design review):**
-- `POST https://dev.plausiden.com/thundercrab/diag` (valid TLS via the dev SAN).
-- `Authorization: Bearer <shared secret baked into the debug build only>`.
+**Channel (as built):**
+- `POST https://dev.plausiden.com/thundercrab/diag` (valid TLS).
+- `Authorization: Bearer <token>` — debug-build-only; **write-only** (the token
+  only permits appending to a server log; nothing is readable through it).
 - Body = `diagnostics_json()` (a JSON array of the §2 events, nothing else).
-- Server side: a tiny localhost `axum` receiver (Sovereign Polyglot Stack) that
-  validates the bearer token and **appends one JSON line to a log file**
-  (`/tank/…/thundercrab-diag.log`) — not an observability stack. Caddy reverse-
-  proxies the path to it.
-- Upload cadence: best-effort, batched, on app foreground; failures are silent
-  (telemetry must never disrupt the user).
+- Server side: `thundercrab-diag-ingest` — a tiny `axum` service
+  (`/home/paul/projects/thundercrab-diag-ingest`) running as a hardened systemd
+  unit on `127.0.0.1:8899` (DynamicUser, ProtectSystem=strict, NoNewPrivileges).
+  Validates the bearer token, caps the body at 256 KiB, and **appends one JSON
+  line** to `/var/log/thundercrab-diag/diag.log`. Caddy reverse-proxies
+  `/thundercrab/diag` → it (rewriting the path to `/diag`).
+- Client: `repo.uploadDiagnostics()` flushes on app background (`onStop`),
+  best-effort, no-op when telemetry is off, clears the buffer on success.
 
-**Before this is enabled in any build:** owner confirms (a) endpoint may be stood
-up, (b) always-on-for-debug vs opt-in, (c) server-side retention. The shared
-secret is debug-build-only; production never carries it.
+**Gates still honored:** off when the master switch is off; first-run consent;
+production builds don't carry the token. Server log retention: rotate/prune
+manually for now (low volume). Verified end-to-end: `204` with token, `401`
+without, events landing in the log.
 
 ---
 
