@@ -86,7 +86,18 @@ fun ThundercrabNavHost() {
             com.plausiden.thundercrab.feature.settings.SettingsScreen(
                 viewModel = vm,
                 onOpenSuggestions = { navController.navigate(Destinations.SUGGESTIONS) },
+                onCreateRule = { navController.navigate(Destinations.RULE_EDIT) },
                 onBack = { navController.popBackStack() },
+            )
+        }
+
+        // 2d. Rule editor ------------------------------------------------------
+        composable(Destinations.RULE_EDIT) {
+            val vm: com.plausiden.thundercrab.feature.rules.RuleEditorViewModel =
+                viewModel(factory = com.plausiden.thundercrab.feature.rules.RuleEditorViewModel.factory(repository))
+            com.plausiden.thundercrab.feature.rules.RuleEditorScreen(
+                viewModel = vm,
+                onDone = { navController.popBackStack() },
             )
         }
 

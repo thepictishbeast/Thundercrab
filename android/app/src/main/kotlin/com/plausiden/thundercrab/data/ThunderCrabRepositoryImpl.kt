@@ -183,6 +183,23 @@ class ThunderCrabRepositoryImpl(
         ffiDeleteRule(dbPath, id)
     }
 
+    override suspend fun saveUserRule(
+        displayName: String,
+        whenJson: String,
+        actionJson: String,
+    ): Result<Unit> = ioCatching {
+        val rule = FfiCrabRule(
+            id = java.util.UUID.randomUUID().toString(),
+            displayName = displayName,
+            whenJson = whenJson,
+            actionJson = actionJson,
+            score = 100,                 // user band (> federated 1..49); higher wins
+            stopOnMatch = true,
+            origin = FfiRuleOrigin.USER, // user-authored = highest trust
+        )
+        ffiSaveRule(dbPath, rule)
+    }
+
     override suspend fun savedRulesSieve(): Result<String> = ioCatching {
         // Load the saved rules then render — rulesToSieve needs the full FfiCrabRule.
         // READ-ONLY: the script is returned for display, never pushed (AVP-2).

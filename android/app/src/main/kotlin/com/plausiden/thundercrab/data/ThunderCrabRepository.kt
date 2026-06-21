@@ -69,6 +69,14 @@ interface ThunderCrabRepository {
     /** Subscribe (true) / unsubscribe (false) a mailbox. */
     suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit>
 
+    /**
+     * Save a user-authored mail-routing rule (origin = USER). `whenJson` is
+     * canonical MatchExpr JSON, `actionJson` canonical Action JSON. Built by the
+     * graphical rule editor; stored in the local rule DB and emitted to Sieve
+     * via [savedRulesSieve].
+     */
+    suspend fun saveUserRule(displayName: String, whenJson: String, actionJson: String): Result<Unit>
+
     // --- Diagnostics / telemetry (on-device, PII-free; see docs/TELEMETRY.md) -
 
     /** Whether on-device diagnostics collection is currently enabled. */

@@ -44,6 +44,7 @@ import com.plausiden.thundercrab.data.ThemeMode
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onOpenSuggestions: () -> Unit,
+    onCreateRule: () -> Unit,
     onBack: () -> Unit,
 ) {
     val appearance by viewModel.appearance.collectAsStateWithLifecycle()
@@ -152,6 +153,7 @@ fun SettingsScreen(
 
             // ---- Rules ---------------------------------------------------------
             SectionHeader("Mail rules")
+            NavRow(title = "Create a rule", subtitle = "Define where incoming mail goes", onClick = onCreateRule)
             NavRow(title = "Rule suggestions", subtitle = "Review + accept learned sorting rules", onClick = onOpenSuggestions)
         }
     }
