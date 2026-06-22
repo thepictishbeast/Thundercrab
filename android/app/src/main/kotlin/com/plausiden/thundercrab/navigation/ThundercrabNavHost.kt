@@ -91,6 +91,21 @@ fun ThundercrabNavHost() {
             )
         }
 
+        // 2e. Compose ----------------------------------------------------------
+        composable(Destinations.COMPOSE) {
+            val vm: com.plausiden.thundercrab.feature.compose.ComposeViewModel =
+                viewModel(
+                    factory = com.plausiden.thundercrab.feature.compose.ComposeViewModel.factory(
+                        repository,
+                        container.prefs,
+                    ),
+                )
+            com.plausiden.thundercrab.feature.compose.ComposeScreen(
+                viewModel = vm,
+                onDone = { navController.popBackStack() },
+            )
+        }
+
         // 2d. Rule editor ------------------------------------------------------
         composable(Destinations.RULE_EDIT) {
             val vm: com.plausiden.thundercrab.feature.rules.RuleEditorViewModel =
@@ -133,6 +148,7 @@ fun ThundercrabNavHost() {
                 onMessageClick = { uid ->
                     navController.navigate(Destinations.read(folder, uid))
                 },
+                onCompose = { navController.navigate(Destinations.COMPOSE) },
             )
         }
 

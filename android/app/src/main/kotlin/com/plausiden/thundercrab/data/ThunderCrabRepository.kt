@@ -70,6 +70,19 @@ interface ThunderCrabRepository {
     suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit>
 
     /**
+     * Send an outbound message via SMTP. `password` is supplied per-call and
+     * never retained (spec §5.2). `from` is the connected account; signature is
+     * appended by the caller into `body`.
+     */
+    suspend fun sendMessage(
+        password: String,
+        to: List<String>,
+        cc: List<String>,
+        subject: String,
+        body: String,
+    ): Result<Unit>
+
+    /**
      * Save a user-authored mail-routing rule (origin = USER). `whenJson` is
      * canonical MatchExpr JSON, `actionJson` canonical Action JSON. Built by the
      * graphical rule editor; stored in the local rule DB and emitted to Sieve

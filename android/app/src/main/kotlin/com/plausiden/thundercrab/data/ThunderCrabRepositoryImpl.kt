@@ -29,6 +29,8 @@ import uniffi.thundercrab_ffi.FfiFlagEvent
 import uniffi.thundercrab_ffi.FfiFlagSource
 import uniffi.thundercrab_ffi.FfiHeaders
 import uniffi.thundercrab_ffi.FfiFolder
+import uniffi.thundercrab_ffi.FfiOutboundMessage
+import uniffi.thundercrab_ffi.FfiSmtpEncryption
 import uniffi.thundercrab_ffi.FfiRuleOrigin
 import uniffi.thundercrab_ffi.ThunderCrabClient
 import uniffi.thundercrab_ffi.connect as ffiConnect
@@ -43,6 +45,7 @@ import uniffi.thundercrab_ffi.plausidenAccountConfig
 import uniffi.thundercrab_ffi.previewSuggestions as ffiPreviewSuggestions
 import uniffi.thundercrab_ffi.recordFlagEvent
 import uniffi.thundercrab_ffi.rulesToSieve as ffiRulesToSieve
+import uniffi.thundercrab_ffi.sendMessage as ffiSendMessage
 import uniffi.thundercrab_ffi.saveRule as ffiSaveRule
 
 /**
@@ -68,6 +71,10 @@ class ThunderCrabRepositoryImpl(
 
     private val clientLock = Mutex()
     private var client: ThunderCrabClient? = null
+    // The connected account's NON-SECRET config (host/ports/username), retained so
+    // compose can send. The password is NEVER retained (spec §5.2) — it is
+    // re-supplied per send.
+    private var connectedDraft: AccountDraft? = null
     // Per-folder header cache feeding MessageRead (no-body invariant, spec §5.1/§2).
     private val headerCache = mutableMapOf<String, List<MessageHeader>>()
     // Last preview's full rules, keyed by id, so acceptSuggestion() can persist
@@ -99,6 +106,7 @@ class ThunderCrabRepositoryImpl(
                 clientLock.withLock {
                     client?.runCatching { close() } // free any prior handle
                     client = newClient
+                    connectedDraft = draft           // non-secret; for compose/send
                     headerCache.clear()
                 }
                 ConnectResult.Connected
@@ -146,6 +154,29 @@ class ThunderCrabRepositoryImpl(
 
     override suspend fun setSubscribed(name: String, subscribed: Boolean): Result<Unit> =
         guarded { c -> c.setSubscribed(name, subscribed) }
+
+    override suspend fun sendMessage(
+        password: String,
+        to: List<String>,
+        cc: List<String>,
+        subject: String,
+        body: String,
+    ): Result<Unit> = ioCatching {
+        val draft = connectedDraft
+            ?: throw FfiException.InvalidInput("Not connected — log in first.")
+        val cfg = draft.toFfi()
+            ?: throw FfiException.InvalidInput("Account config invalid.")
+        val msg = FfiOutboundMessage(
+            from = draft.username,
+            to = to,
+            cc = cc,
+            subject = subject,
+            body = body,
+        )
+        // STARTTLS on 587 (the plausiden default). Password is passed straight
+        // to the FFI and never retained here.
+        ffiSendMessage(cfg, password, FfiSmtpEncryption.START_TLS, msg)
+    }
 
     // --- Diagnostics / telemetry (synchronous in-memory FFI; no IMAP needed) --
     override fun telemetryEnabled(): Boolean = telemetryIsEnabled()

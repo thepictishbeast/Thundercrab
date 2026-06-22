@@ -57,6 +57,11 @@ class AppPrefs(context: Context) {
         get() = sp.getBoolean(KEY_TELEMETRY, true)
         set(v) = sp.edit().putBoolean(KEY_TELEMETRY, v).apply()
 
+    /** Outgoing-mail signature, appended to composed messages. Not a secret. */
+    var signature: String
+        get() = sp.getString(KEY_SIGNATURE, "") ?: ""
+        set(v) = sp.edit().putString(KEY_SIGNATURE, v).apply()
+
     private fun loadAppearance(): AppearancePrefs = AppearancePrefs(
         themeMode = runCatching { ThemeMode.valueOf(sp.getString(KEY_THEME, null) ?: "SYSTEM") }
             .getOrDefault(ThemeMode.SYSTEM),
@@ -70,5 +75,6 @@ class AppPrefs(context: Context) {
         const val KEY_DYNAMIC = "dynamic_color"
         const val KEY_CONSENT = "diag_consent_shown"
         const val KEY_TELEMETRY = "telemetry_enabled"
+        const val KEY_SIGNATURE = "signature"
     }
 }

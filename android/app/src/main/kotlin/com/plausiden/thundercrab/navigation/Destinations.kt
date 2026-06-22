@@ -16,6 +16,7 @@ object Destinations {
     const val SUGGESTIONS = "suggestions"
     const val SETTINGS = "settings"
     const val RULE_EDIT = "rule_edit"
+    const val COMPOSE = "compose"
 
     // Arg keys.
     const val ARG_FOLDER = "folder"

@@ -32,6 +32,14 @@ class SettingsViewModel(
     private val _diagnostics = MutableStateFlow(repo.diagnostics())
     val diagnostics: StateFlow<List<DiagEvent>> = _diagnostics.asStateFlow()
 
+    private val _signature = MutableStateFlow(prefs.signature)
+    val signature: StateFlow<String> = _signature.asStateFlow()
+
+    fun setSignature(s: String) {
+        prefs.signature = s
+        _signature.value = s
+    }
+
     fun setThemeMode(mode: ThemeMode) = prefs.setThemeMode(mode)
     fun setAmoled(on: Boolean) = prefs.setAmoled(on)
     fun setDynamicColor(on: Boolean) = prefs.setDynamicColor(on)

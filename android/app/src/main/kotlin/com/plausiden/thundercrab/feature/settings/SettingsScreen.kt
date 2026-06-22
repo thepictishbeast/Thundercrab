@@ -25,6 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -50,6 +51,7 @@ fun SettingsScreen(
     val appearance by viewModel.appearance.collectAsStateWithLifecycle()
     val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
+    val signature by viewModel.signature.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -148,6 +150,20 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
+            // ---- Outgoing mail -------------------------------------------------
+            SectionHeader("Outgoing mail")
+            OutlinedTextField(
+                value = signature,
+                onValueChange = viewModel::setSignature,
+                label = { Text("Signature") },
+                minLines = 2,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
