@@ -44,6 +44,48 @@ use tokio_rustls::client::TlsStream;
 
 use crate::{AccountConfig, Backend, BackendError, FolderSummary, MessageHeaders};
 
+/// An authenticated IMAPS session over the post-quantum TLS stack.
+/// Shared by [`RustImapBackend`] (command channel) and the IDLE
+/// watcher ([`crate::idle`]), which dedicates its own connection.
+pub(crate) type ImapSession = Session<TlsStream<TcpStream>>;
+
+/// Open an IMAPS connection to `config`'s host and authenticate with
+/// `LOGIN`. The single source of truth for ThunderCrab's connect path
+/// so the command backend and the IDLE watcher share identical TLS
+/// posture, timeout, and error mapping.
+///
+/// `password` is used only for the `LOGIN` command and dropped by the
+/// caller; it is never retained on the returned session.
+///
+/// # Errors
+/// - [`BackendError::Transport`] if TCP connect, TLS handshake, or the
+///   server greeting fails.
+/// - [`BackendError::Auth`] if `LOGIN` is rejected.
+pub(crate) async fn connect_session(
+    config: &AccountConfig,
+    password: &str,
+) -> Result<ImapSession, BackendError> {
+    let host = config.imap_host.as_str();
+    let port = config.imap_port;
+    let tcp = crate::connect_with_timeout(host, port, crate::CONNECT_TIMEOUT).await?;
+
+    let connector = TlsConnector::from(Arc::new(crate::tls::client_config(config.crypto_mode)));
+    let server_name = ServerName::try_from(host.to_string())
+        .map_err(|e| BackendError::Transport(format!("server name: {e}")))?;
+    let tls = connector
+        .connect(server_name, tcp)
+        .await
+        .map_err(|e| BackendError::Transport(format!("tls handshake: {e}")))?;
+
+    let client = async_imap::Client::new(tls);
+    // The greeting is read by `login` internally; if the server is
+    // misbehaving we surface that as Transport, not Auth.
+    client
+        .login(&config.username, password)
+        .await
+        .map_err(|(e, _client)| BackendError::Auth(e.to_string()))
+}
+
 /// Active IMAPS session bound to one account.
 #[derive(Debug)]
 pub struct RustImapBackend {
@@ -68,27 +110,7 @@ impl RustImapBackend {
         config: &AccountConfig,
         password: &str,
     ) -> Result<Self, BackendError> {
-        let host = config.imap_host.as_str();
-        let port = config.imap_port;
-        let tcp = crate::connect_with_timeout(host, port, crate::CONNECT_TIMEOUT).await?;
-
-        let connector =
-            TlsConnector::from(Arc::new(crate::tls::client_config(config.crypto_mode)));
-        let server_name = ServerName::try_from(host.to_string())
-            .map_err(|e| BackendError::Transport(format!("server name: {e}")))?;
-        let tls = connector
-            .connect(server_name, tcp)
-            .await
-            .map_err(|e| BackendError::Transport(format!("tls handshake: {e}")))?;
-
-        let client = async_imap::Client::new(tls);
-        // The greeting is read by `login` internally; if the server
-        // is misbehaving we surface that as Transport, not Auth.
-        let session = client
-            .login(&config.username, password)
-            .await
-            .map_err(|(e, _client)| BackendError::Auth(e.to_string()))?;
-
+        let session = connect_session(config, password).await?;
         Ok(Self {
             session: Mutex::new(session),
         })
