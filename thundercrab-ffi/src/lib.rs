@@ -27,6 +27,7 @@ use thundercrab_core::telemetry::{self, DiagCategory, DiagEvent, DiagKind};
 use thundercrab_core::{
     Action, CrabRule, Db, FlagEvent, FlagSource, MatchExpr, RuleOrigin, to_sieve,
 };
+use thundercrab_imap::idle::{self, IdleWatcher};
 use thundercrab_imap::rust_imap::RustImapBackend;
 use thundercrab_imap::smtp::{self, OutboundMessage, SmtpEncryption};
 use thundercrab_imap::{AccountConfig, Backend as _, BackendError, CryptoMode, managesieve};
@@ -1160,6 +1161,132 @@ impl ThunderCrabClient {
 fn client_gone() -> FfiError {
     FfiError::NotImplemented {
         detail: "client has been logged out".to_string(),
+    }
+}
+
+// =============================================================================
+// IMAP IDLE push watcher
+// =============================================================================
+
+/// The outcome of one [`ThunderCrabIdleWatcher::wait`]. Flat mirror of
+/// [`thundercrab_imap::idle::IdleEvent`] for the binding.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiIdleEvent {
+    /// The server reported activity on the watched folder. The caller should
+    /// re-fetch headers (e.g. via a separate [`ThunderCrabClient`]) and post a
+    /// notification, then resume watching.
+    Activity,
+    /// The re-arm timeout elapsed with no activity — just resume watching.
+    Idle,
+}
+
+impl From<idle::IdleEvent> for FfiIdleEvent {
+    fn from(e: idle::IdleEvent) -> Self {
+        match e {
+            idle::IdleEvent::Activity => Self::Activity,
+            idle::IdleEvent::Idle => Self::Idle,
+        }
+    }
+}
+
+/// A dedicated IMAP IDLE connection for push-style mail arrival, intended to
+/// be held for the lifetime of an Android foreground service that holds a
+/// Keystore-encrypted password for reconnects.
+///
+/// A *separate* object from [`ThunderCrabClient`] by design: IMAP is
+/// single-channel, so a connection parked in IDLE cannot also serve the UI's
+/// LIST / FETCH. The inner [`IdleWatcher`] is held as `Mutex<Option<…>>`
+/// because each [`IdleWatcher::wait`] consumes and returns it; `take` +
+/// replace threads the owned watcher through the object's `&self` surface.
+///
+/// ## Lifecycle
+/// Drive [`ThunderCrabIdleWatcher::wait`] (or [`Self::wait_rearm`]) in a loop
+/// from one service coroutine. A failed wait leaves the slot empty, so the
+/// next call returns `NotImplemented` and the service should reconnect via
+/// [`connect_idle`]. To stop watching, drop the object (which closes the IMAP
+/// connection) or call [`Self::logout`] between waits — `wait` holds the
+/// connection for its whole duration, so it cannot be interrupted mid-park.
+#[derive(uniffi::Object)]
+pub struct ThunderCrabIdleWatcher {
+    inner: Mutex<Option<IdleWatcher>>,
+}
+
+/// Connect, authenticate, and `SELECT` `folder` (e.g. `"INBOX"`), leaving a
+/// watcher parked and ready to IDLE. Free async fn (returns `Result`,
+/// mirroring [`connect`]); the connect itself is bounded by `OP_TIMEOUT`,
+/// but the subsequent [`ThunderCrabIdleWatcher::wait`] is intentionally not.
+///
+/// The password is used only for `LOGIN` and is not retained.
+///
+/// # Errors
+/// `Transport` if TCP/TLS/greeting fails or the connect times out; `Auth` if
+/// `LOGIN` is rejected; `Protocol` if `SELECT folder` fails.
+#[uniffi::export(async_runtime = "tokio")]
+pub async fn connect_idle(
+    cfg: FfiAccountConfig,
+    password: String,
+    folder: String,
+) -> Result<Arc<ThunderCrabIdleWatcher>, FfiError> {
+    let account = AccountConfig::from(&cfg);
+    let watcher = tokio::time::timeout(
+        OP_TIMEOUT,
+        IdleWatcher::connect(&account, &password, &folder),
+    )
+    .await
+    .map_err(|_| FfiError::Transport {
+        detail: "connect_idle timed out".to_string(),
+    })??;
+    Ok(Arc::new(ThunderCrabIdleWatcher {
+        inner: Mutex::new(Some(watcher)),
+    }))
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl ThunderCrabIdleWatcher {
+    /// Park in IDLE until the server reports activity or `timeout_secs`
+    /// elapses, whichever comes first; return which happened. Prefer
+    /// [`Self::wait_rearm`] for the RFC-2177-safe interval.
+    ///
+    /// Holds the connection for the whole call. On success the watcher is
+    /// retained for the next call; on error it is dropped (the connection is
+    /// spent) and subsequent calls return `NotImplemented`.
+    ///
+    /// # Errors
+    /// `Protocol` if the IDLE/DONE handshake fails (typically a dropped
+    /// connection — reconnect via [`connect_idle`]); `NotImplemented` if the
+    /// watcher was already logged out or spent.
+    pub async fn wait(&self, timeout_secs: u64) -> Result<FfiIdleEvent, FfiError> {
+        let mut guard = self.inner.lock().await;
+        let watcher = guard.take().ok_or_else(client_gone)?;
+        // On error the watcher has been moved into `wait` and dropped, so the
+        // slot stays `None` — exactly the "spent connection" signal we want.
+        let (event, watcher) = watcher
+            .wait(std::time::Duration::from_secs(timeout_secs))
+            .await?;
+        *guard = Some(watcher);
+        Ok(event.into())
+    }
+
+    /// [`Self::wait`] using the RFC-2177-safe re-arm interval
+    /// ([`thundercrab_imap::idle::IDLE_REARM`], 29 minutes).
+    ///
+    /// # Errors
+    /// As [`Self::wait`].
+    pub async fn wait_rearm(&self) -> Result<FfiIdleEvent, FfiError> {
+        self.wait(idle::IDLE_REARM.as_secs()).await
+    }
+
+    /// Log out cleanly, leaving the watcher inert. Best-effort + bounded — a
+    /// stalled server must not hang shutdown. Only takes effect between waits
+    /// (a wait in progress holds the lock until it returns).
+    pub async fn logout(&self) {
+        let watcher = {
+            let mut guard = self.inner.lock().await;
+            guard.take()
+        };
+        if let Some(watcher) = watcher {
+            let _ = tokio::time::timeout(OP_TIMEOUT, watcher.logout()).await;
+        }
     }
 }
 
