@@ -29,7 +29,7 @@
 //!   pooling internally, but ThunderCrab's GUI submits one at a
 //!   time anyway).
 
-use lettre::message::Mailbox;
+use lettre::message::{Mailbox, MultiPart};
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncTransport, Message, Tokio1Executor};
@@ -59,9 +59,20 @@ pub struct OutboundMessage<'a> {
     pub cc: &'a [&'a str],
     /// `Subject:` line.
     pub subject: &'a str,
-    /// Plain-text body. ThunderCrab's v0 sends text/plain only;
-    /// HTML bodies are a follow-up once the editor exists.
+    /// Plain-text body. Always sent — it is the universal fallback part
+    /// of `multipart/alternative` (and the whole message when `html_body`
+    /// is `None`). For a ThunderCrab Markdown compose, this is the source
+    /// Markdown, which stays perfectly readable in any plain-text client.
     pub body: &'a str,
+    /// Optional HTML body. When `Some`, the message is sent as
+    /// `multipart/alternative` (`text/plain` first, `text/html` second) so
+    /// every client renders one part: ThunderCrab/HTML-capable clients show
+    /// the HTML, plain-text clients fall back to [`OutboundMessage::body`].
+    ///
+    /// SECURITY: the caller is responsible for producing trustworthy HTML
+    /// (e.g. rendering ThunderCrab Markdown through a sanitizing pipeline).
+    /// This module does not sanitize — it only frames the parts.
+    pub html_body: Option<&'a str>,
 }
 
 /// Connect, authenticate, send one message, close the transport.
@@ -81,18 +92,7 @@ pub async fn send_message(
     // also gives the SMTP path the same PQ-capable provider as IMAP/Sieve.
     crate::tls::ensure_provider();
 
-    let mut builder = Message::builder()
-        .from(parse_mailbox(message.from)?)
-        .subject(message.subject);
-    for to in message.to {
-        builder = builder.to(parse_mailbox(to)?);
-    }
-    for cc in message.cc {
-        builder = builder.cc(parse_mailbox(cc)?);
-    }
-    let email = builder
-        .body(message.body.to_string())
-        .map_err(|e| BackendError::Protocol(format!("compose: {e}")))?;
+    let email = build_message(message)?;
 
     let creds = Credentials::new(cfg.username.clone(), password.to_string());
     let transport = match encryption {
@@ -119,6 +119,39 @@ pub async fn send_message(
         .await
         .map(|_response| ())
         .map_err(|e| BackendError::Transport(format!("smtp send: {e}")))
+}
+
+/// Translate an [`OutboundMessage`] into a `lettre::Message`, framing the
+/// body as `multipart/alternative` (`text/plain` + `text/html`) when an HTML
+/// body is present, or a single `text/plain` part otherwise.
+///
+/// Pure (no I/O) so the MIME-shaping decision is unit-testable without a
+/// network round-trip.
+///
+/// # Errors
+/// `Protocol` if any address is malformed or lettre rejects the composed body.
+fn build_message(message: &OutboundMessage<'_>) -> Result<Message, BackendError> {
+    let mut builder = Message::builder()
+        .from(parse_mailbox(message.from)?)
+        .subject(message.subject);
+    for to in message.to {
+        builder = builder.to(parse_mailbox(to)?);
+    }
+    for cc in message.cc {
+        builder = builder.cc(parse_mailbox(cc)?);
+    }
+
+    let composed = match message.html_body {
+        // text/plain first, text/html second: per MIME, clients render the
+        // LAST part they understand, so HTML-capable clients show the HTML
+        // while plain-text clients fall back to the plain part.
+        Some(html) => builder.multipart(MultiPart::alternative_plain_html(
+            message.body.to_string(),
+            html.to_string(),
+        )),
+        None => builder.body(message.body.to_string()),
+    };
+    composed.map_err(|e| BackendError::Protocol(format!("compose: {e}")))
 }
 
 fn parse_mailbox(s: &str) -> Result<Mailbox, BackendError> {
@@ -148,5 +181,58 @@ mod tests {
     fn parse_mailbox_rejects_garbage() {
         assert!(parse_mailbox("not an address").is_err());
         assert!(parse_mailbox("").is_err());
+    }
+
+    fn msg<'a>(body: &'a str, html: Option<&'a str>) -> OutboundMessage<'a> {
+        OutboundMessage {
+            from: "sender@example.com",
+            to: &["rcpt@example.com"],
+            cc: &[],
+            subject: "hi",
+            body,
+            html_body: html,
+        }
+    }
+
+    #[test]
+    fn plain_only_message_is_single_part() {
+        // lettre emits a bare single-part body (no explicit Content-Type
+        // header) for `.body()`, so the meaningful invariant is: NOT
+        // multipart, and the body is present verbatim.
+        let email = build_message(&msg("just text", None)).expect("builds");
+        let wire = String::from_utf8(email.formatted()).expect("utf8");
+        assert!(
+            !wire.contains("multipart/alternative"),
+            "no multipart when html_body is None:\n{wire}"
+        );
+        assert!(!wire.contains("text/html"), "no html part:\n{wire}");
+        assert!(wire.contains("just text"), "plain body present:\n{wire}");
+    }
+
+    #[test]
+    fn html_message_is_multipart_alternative_with_both_parts() {
+        let email =
+            build_message(&msg("plain fallback", Some("<p>rich</p>"))).expect("builds");
+        let wire = String::from_utf8(email.formatted()).expect("utf8");
+        assert!(
+            wire.contains("multipart/alternative"),
+            "multipart/alternative when html present:\n{wire}"
+        );
+        // Both alternatives must ship so non-HTML clients have the fallback.
+        assert!(wire.contains("text/plain"), "plain fallback part present");
+        assert!(wire.contains("text/html"), "html part present");
+    }
+
+    #[test]
+    fn build_message_rejects_bad_address() {
+        let bad = OutboundMessage {
+            from: "garbage",
+            to: &["rcpt@example.com"],
+            cc: &[],
+            subject: "hi",
+            body: "x",
+            html_body: None,
+        };
+        assert!(build_message(&bad).is_err());
     }
 }

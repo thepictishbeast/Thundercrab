@@ -440,8 +440,14 @@ pub struct FfiOutboundMessage {
     pub cc: Vec<String>,
     /// `Subject:` line.
     pub subject: String,
-    /// Plain-text body.
+    /// Plain-text body — always sent (the universal fallback / whole message
+    /// when `html_body` is null). For a Markdown compose, pass the Markdown
+    /// source here; it reads fine in any plain-text client.
     pub body: String,
+    /// Optional HTML body. When present the message is sent as
+    /// `multipart/alternative` so HTML-capable clients render it and others
+    /// fall back to `body`. The caller is responsible for sanitizing it.
+    pub html_body: Option<String>,
 }
 
 // =============================================================================
@@ -781,6 +787,7 @@ pub async fn send_message(
         cc: &cc,
         subject: message.subject.as_str(),
         body: message.body.as_str(),
+        html_body: message.html_body.as_deref(),
     };
     timed(
         "send_message",

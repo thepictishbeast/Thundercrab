@@ -72,9 +72,15 @@ enum Cmd {
         /// Subject line.
         #[arg(long)]
         subject: String,
-        /// Body. Use `--body @file.txt` to read from a file.
+        /// Plain-text body (always sent; the fallback part). Use
+        /// `--body @file.txt` to read from a file.
         #[arg(long)]
         body: String,
+        /// Optional HTML body. When set, the message goes out as
+        /// `multipart/alternative` (plain + HTML). Use `--html @file.html`
+        /// to read from a file.
+        #[arg(long)]
+        html: Option<String>,
         /// Submission flavor — `starttls` (port 587) or `implicit` (port 465).
         #[arg(long, default_value = "starttls")]
         encryption: String,
@@ -116,9 +122,20 @@ async fn run(cli: Cli) -> Result<()> {
             cc,
             subject,
             body,
+            html,
             encryption,
         } => {
-            cmd_send(&cfg, &password, &to, &cc, &subject, &body, &encryption).await
+            cmd_send(
+                &cfg,
+                &password,
+                &to,
+                &cc,
+                &subject,
+                &body,
+                html.as_deref(),
+                &encryption,
+            )
+            .await
         }
     }
 }
@@ -198,16 +215,23 @@ async fn cmd_send(
     cc: &[String],
     subject: &str,
     body: &str,
+    html: Option<&str>,
     encryption: &str,
 ) -> Result<()> {
     if to.is_empty() {
         return Err(anyhow!("at least one --to recipient required"));
     }
-    let body_owned = if let Some(file) = body.strip_prefix('@') {
-        std::fs::read_to_string(file).with_context(|| format!("reading body from {file}"))?
-    } else {
-        body.to_string()
+    // `@file` reads the body/html from a local file the operator named on the
+    // command line — intended CLI behavior, not untrusted input.
+    let read_arg = |arg: &str, label: &str| -> Result<String> {
+        if let Some(file) = arg.strip_prefix('@') {
+            std::fs::read_to_string(file).with_context(|| format!("reading {label} from {file}"))
+        } else {
+            Ok(arg.to_string())
+        }
     };
+    let body_owned = read_arg(body, "body")?;
+    let html_owned = html.map(|h| read_arg(h, "html")).transpose()?;
     let to_refs: Vec<&str> = to.iter().map(String::as_str).collect();
     let cc_refs: Vec<&str> = cc.iter().map(String::as_str).collect();
     let from = cfg.username.as_str();
@@ -217,6 +241,7 @@ async fn cmd_send(
         cc: &cc_refs,
         subject,
         body: &body_owned,
+        html_body: html_owned.as_deref(),
     };
     let enc = match encryption {
         "starttls" => SmtpEncryption::StartTls,

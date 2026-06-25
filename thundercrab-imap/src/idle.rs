@@ -13,11 +13,11 @@
 //! the caller drives a simple loop — typically from an Android foreground
 //! service that holds a Keystore-encrypted password for re-auth:
 //!
-//! ```no_run
-//! # async fn run(cfg: &thundercrab_imap::AccountConfig, password: &str)
-//! #     -> Result<(), thundercrab_imap::BackendError> {
-//! use thundercrab_imap::idle::{IdleWatcher, IdleEvent};
+//! (Non-compiled illustration — the compiled, runnable version lives in
+//! `examples/idle_watch.rs`. Workspace convention is `text` doc snippets so
+//! `missing_docs = "deny"` + merged doctests don't choke on a synthetic crate.)
 //!
+//! ```text
 //! let mut watcher = IdleWatcher::connect(cfg, password, "INBOX").await?;
 //! loop {
 //!     let (event, next) = watcher.wait_rearm().await?;
@@ -26,7 +26,6 @@
 //!     }
 //!     watcher = next; // resume watching (re-arms IDLE)
 //! }
-//! # }
 //! ```
 //!
 //! ## Re-arm, not keep-alive forever
