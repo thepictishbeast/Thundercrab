@@ -125,6 +125,48 @@ impl RustImapBackend {
             tracing::warn!(error = %e, "imap logout failed; dropping session");
         }
     }
+
+    /// Fetch one message's full body and parse it into display-ready,
+    /// already-sanitized parts ([`crate::body::MessageBody`]).
+    ///
+    /// `EXAMINE` (read-only select) + `UID FETCH <uid> BODY.PEEK[]` — the
+    /// `.PEEK` means fetching the body does NOT set `\Seen`, so previewing a
+    /// message never silently marks it read. The raw MIME is handed to
+    /// [`crate::body::parse_body`], which extracts the text/HTML parts and
+    /// sanitizes the HTML.
+    ///
+    /// An empty/unparseable message yields an empty `MessageBody`, not an
+    /// error — one bad message must never sink the reader.
+    ///
+    /// # Errors
+    /// [`BackendError::Protocol`] if `EXAMINE` or the `FETCH` fails.
+    pub async fn fetch_body(
+        &self,
+        folder: &str,
+        uid: u32,
+    ) -> Result<crate::body::MessageBody, BackendError> {
+        let mut session = self.session.lock().await;
+        session
+            .examine(folder)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("examine {folder}: {e}")))?;
+
+        let mut stream = session
+            .uid_fetch(format!("{uid}"), "BODY.PEEK[]")
+            .await
+            .map_err(|e| BackendError::Protocol(format!("uid_fetch body {uid}: {e}")))?;
+
+        let mut raw: Vec<u8> = Vec::new();
+        while let Some(item) = stream.next().await {
+            let fetch = item.map_err(|e| BackendError::Protocol(format!("fetch body item: {e}")))?;
+            if let Some(section) = fetch.body() {
+                raw.extend_from_slice(section);
+                break; // a single UID returns a single message body
+            }
+        }
+
+        Ok(crate::body::parse_body(&raw))
+    }
 }
 
 /// A folder discovered via `LIST`, with the bits we need *before* we

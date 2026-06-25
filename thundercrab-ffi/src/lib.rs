@@ -415,6 +415,18 @@ pub struct FfiHeaders {
     pub other_headers: Vec<FfiHeader>,
 }
 
+/// A received message's display body. The HTML part is ALREADY SANITIZED by the
+/// core (scripts, event handlers, and all remote content removed) — safe to
+/// render directly (e.g. in a `WebView`). Either part may be null.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiMessageBody {
+    /// Plain-text body, if present.
+    pub plain: Option<String>,
+    /// Sanitized HTML body (a real text/html part, or the text converted to
+    /// HTML), safe to render. Null only when there is no renderable body.
+    pub html_sanitized: Option<String>,
+}
+
 // =============================================================================
 // SMTP / outbound
 // =============================================================================
@@ -983,6 +995,27 @@ impl ThunderCrabClient {
         .await
     }
 
+    /// Fetch one message's full body, returning display-ready parts: the
+    /// plain-text body and the HTML body ALREADY SANITIZED by the core
+    /// (scripts + all remote content removed — safe to render in a `WebView`).
+    /// Uses `BODY.PEEK`, so previewing does not mark the message read.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn fetch_body(&self, folder: String, uid: u32) -> Result<FfiMessageBody, FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+        let body = tokio::time::timeout(OP_TIMEOUT, backend.fetch_body(&folder, uid))
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "fetch_body timed out".to_string(),
+            })??;
+        Ok(FfiMessageBody {
+            plain: body.plain,
+            html_sanitized: body.html_sanitized,
+        })
+    }
+
     /// Move `uid` from `from_folder` to `to_folder` (the IMAP side of a
     /// recorded flag-event move).
     ///
@@ -1142,21 +1175,6 @@ impl ThunderCrabClient {
             },
         )
         .await
-    }
-
-    /// Fetch a message body. NOT IMPLEMENTED: `thundercrab-imap` exposes no
-    /// body-reading method, and adding one (a `BODY.PEEK[]` fetch + a MIME
-    /// parser) is a display-only carve-out gated on explicit ratification and
-    /// walled off from the rules/suggestions/ledger spine. Until then this is a
-    /// hard `NotImplemented`.
-    ///
-    /// # Errors
-    /// Always `NotImplemented`.
-    #[allow(clippy::unused_async)] // signature parity with the future real impl
-    pub async fn fetch_body(&self, _folder: String, _uid: u32) -> Result<String, FfiError> {
-        Err(FfiError::NotImplemented {
-            detail: "fetch_body: reading message bodies is gated and unimplemented".to_string(),
-        })
     }
 
     /// Log out cleanly. Consumes the inner backend via `.take()`; subsequent
