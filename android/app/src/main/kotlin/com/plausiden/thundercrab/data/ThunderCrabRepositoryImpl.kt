@@ -172,6 +172,9 @@ class ThunderCrabRepositoryImpl(
             cc = cc,
             subject = subject,
             body = body,
+            // Plain-text compose for now; rich (Markdown→HTML via renderMarkdown)
+            // is wired in the compose-UI layer. null → a text/plain-only message.
+            htmlBody = null,
         )
         // STARTTLS on 587 (the plausiden default). Password is passed straight
         // to the FFI and never retained here.
