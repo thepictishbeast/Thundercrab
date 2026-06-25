@@ -360,6 +360,17 @@ pub fn plausiden_account_config(username: String) -> FfiAccountConfig {
     AccountConfig::plausiden("mail.plausiden.com", username).into()
 }
 
+/// Render a ThunderCrab Markdown compose body to sanitized, display-safe HTML —
+/// the `text/html` part of an outgoing message (pair it with the Markdown
+/// source as the `text/plain` body). CommonMark + safe extensions, run through
+/// the same sanitizer as received mail: no scripts, no remote content, no JS.
+/// Pure and deterministic; safe to call on the UI thread.
+#[uniffi::export]
+#[must_use]
+pub fn render_markdown(markdown: String) -> String {
+    thundercrab_core::mail_html::markdown_to_safe_html(&markdown)
+}
+
 // =============================================================================
 // Folder / header data records
 // =============================================================================

@@ -46,9 +46,39 @@ pub fn sanitize_html(raw: &str) -> String {
         .to_string()
 }
 
+/// Render ThunderCrab's native Markdown compose body to display-safe HTML.
+///
+/// `CommonMark` via `pulldown-cmark`, with a few safe, widely-supported
+/// extensions (tables, strikethrough, task lists, footnotes). The rendered
+/// HTML is **always** passed back through [`sanitize_html`], so any raw HTML a
+/// user embeds in their Markdown is sanitized too and no remote content can
+/// load. Deterministic, no JS, no network — "good visuals" without the attack
+/// surface of a bespoke markup language.
+///
+/// This is the html part of a ThunderCrab message; the original Markdown source
+/// travels as the `text/plain` part, staying perfectly readable in any client.
+#[must_use]
+pub fn markdown_to_safe_html(markdown: &str) -> String {
+    use pulldown_cmark::{Options, Parser, html};
+
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_FOOTNOTES);
+
+    let parser = Parser::new_ext(markdown, options);
+    let mut rendered = String::with_capacity(markdown.len() * 3 / 2);
+    html::push_html(&mut rendered, parser);
+
+    // Defense in depth: render output goes through the same sanitizer as
+    // received mail, so embedded raw HTML / remote content can never slip out.
+    sanitize_html(&rendered)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::sanitize_html;
+    use super::{markdown_to_safe_html, sanitize_html};
 
     #[test]
     fn strips_script_tags() {
@@ -101,5 +131,43 @@ mod tests {
         assert!(out.contains("<i>italic</i>"), "italic kept: {out}");
         // The link itself (a non-resource-loading reference) survives.
         assert!(out.contains("example.com"), "safe link kept: {out}");
+    }
+
+    #[test]
+    fn markdown_renders_basic_formatting() {
+        let html = markdown_to_safe_html("# Title\n\n**bold** and *italic*\n\n- one\n- two");
+        assert!(html.contains("<h1>"), "heading: {html}");
+        assert!(html.contains("<strong>bold</strong>"), "bold: {html}");
+        assert!(html.contains("<em>italic</em>"), "italic: {html}");
+        assert!(html.contains("<li>one</li>"), "list item: {html}");
+    }
+
+    #[test]
+    fn markdown_renders_tables_and_links() {
+        let html = markdown_to_safe_html("| a | b |\n|---|---|\n| 1 | 2 |\n\n[site](https://example.com)");
+        assert!(html.contains("<table>"), "table extension on: {html}");
+        assert!(html.contains("example.com"), "link rendered: {html}");
+    }
+
+    #[test]
+    fn markdown_output_is_sanitized() {
+        // Raw HTML embedded in Markdown must not bypass the sanitizer.
+        let html = markdown_to_safe_html(
+            "hello <script>steal()</script> <img src=\"https://t.example/p.gif\">",
+        );
+        assert!(html.contains("hello"), "text kept: {html}");
+        assert!(!html.to_lowercase().contains("<script"), "script stripped: {html}");
+        assert!(!html.contains("t.example"), "remote img stripped: {html}");
+    }
+
+    #[test]
+    fn markdown_source_stays_readable_as_plain_fallback() {
+        // The plain part is the Markdown source itself — it should be the
+        // untouched input the caller pairs with this HTML.
+        let src = "**Important**: see the [docs](https://example.com).";
+        let html = markdown_to_safe_html(src);
+        assert!(html.contains("<strong>Important</strong>"), "rendered html: {html}");
+        // (The caller sends `src` verbatim as text/plain; nothing here mutates it.)
+        assert!(src.contains("**Important**"), "source unchanged for plain part");
     }
 }

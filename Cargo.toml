@@ -57,6 +57,13 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 # opening a message never phones home — FairEmail-style privacy posture.
 ammonia = "4"
 
+# ThunderCrab's native rich-compose layer is CommonMark Markdown. pulldown-cmark
+# is the well-trodden, spec-compliant, pure-Rust renderer; output is always run
+# back through ammonia so embedded raw HTML can't bypass sanitization. No JS, no
+# remote content, deterministic — "good visuals" without a bespoke markup's
+# attack surface. default-features=false drops the getopts CLI dep we don't use.
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
