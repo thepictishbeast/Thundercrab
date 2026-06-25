@@ -50,6 +50,13 @@ futures = "0.3"
 # default-features=false drops the unused builders we don't need.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
 
+# Inbound HTML sanitization. Ammonia is the well-audited Rust HTML sanitizer
+# (allowlist-based, ported from Python's bleach). Used to render received HTML
+# mail safely: strips scripts / event handlers / dangerous URLs, and a custom
+# attribute filter additionally blocks remote content (tracking pixels) so
+# opening a message never phones home — FairEmail-style privacy posture.
+ammonia = "4"
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

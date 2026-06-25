@@ -19,6 +19,7 @@
 pub mod crab_rule;
 pub mod db;
 pub mod flag_event;
+pub mod mail_html;
 pub mod sieve;
 pub mod telemetry;
 
