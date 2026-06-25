@@ -30,6 +30,7 @@ import uniffi.thundercrab_ffi.FfiFlagSource
 import uniffi.thundercrab_ffi.FfiHeaders
 import uniffi.thundercrab_ffi.FfiFolder
 import uniffi.thundercrab_ffi.FfiOutboundMessage
+import uniffi.thundercrab_ffi.renderMarkdown
 import uniffi.thundercrab_ffi.FfiSmtpEncryption
 import uniffi.thundercrab_ffi.FfiRuleOrigin
 import uniffi.thundercrab_ffi.ThunderCrabClient
@@ -171,10 +172,12 @@ class ThunderCrabRepositoryImpl(
             to = to,
             cc = cc,
             subject = subject,
+            // The Markdown source travels as the text/plain part — readable as-is
+            // in any client. Its rendered, sanitized HTML is the alternative, so
+            // ThunderCrab/HTML clients show formatting and plain-text clients fall
+            // back to the source. Blank body → no HTML part (plain-only).
             body = body,
-            // Plain-text compose for now; rich (Markdown→HTML via renderMarkdown)
-            // is wired in the compose-UI layer. null → a text/plain-only message.
-            htmlBody = null,
+            htmlBody = body.ifBlank { null }?.let { renderMarkdown(it) },
         )
         // STARTTLS on 587 (the plausiden default). Password is passed straight
         // to the FFI and never retained here.
