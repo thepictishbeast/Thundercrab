@@ -24,11 +24,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -40,7 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.plausiden.thundercrab.ui.components.DisabledBodyCard
+import com.plausiden.thundercrab.ui.components.MessageBodyHtml
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,7 +89,6 @@ fun MessageReadScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                DisabledBodyCard()
                 return@Column
             }
 
@@ -100,6 +101,8 @@ fun MessageReadScreen(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            state.readReceiptRequested?.let { ReadReceiptNotice(it) }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
 
@@ -118,9 +121,72 @@ fun MessageReadScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Fixed disabled body region (no-body invariant).
-            DisabledBodyCard()
+            MessageBodySection(state)
         }
+    }
+}
+
+@Composable
+private fun MessageBodySection(state: MessageReadUiState) {
+    when {
+        state.bodyLoading -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.height(18.dp).width(18.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Loading message…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        state.bodyError != null -> {
+            Text(
+                text = "Couldn't load the message body: ${state.bodyError}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        // Prefer the sanitized HTML rendering when present.
+        !state.bodyHtml.isNullOrBlank() -> {
+            MessageBodyHtml(
+                html = state.bodyHtml,
+                modifier = Modifier.fillMaxWidth().height(420.dp),
+            )
+        }
+
+        !state.bodyPlain.isNullOrBlank() -> {
+            Text(
+                text = state.bodyPlain,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        else -> {
+            Text(
+                text = "(no message body)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReadReceiptNotice(address: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = "The sender requested a read receipt ($address). ThunderCrab will not send one automatically.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }
 

@@ -24,4 +24,10 @@ data class MessageHeader(
     val from: String,
     val subject: String,
     val otherHeaders: List<Pair<String, String>>,
+    /**
+     * If the sender requested a read receipt (RFC 8098), the address it would go
+     * to; null otherwise. Surfaced to the user as a notice — ThunderCrab never
+     * auto-acknowledges.
+     */
+    val readReceiptRequested: String? = null,
 )

@@ -11,6 +11,7 @@ import com.plausiden.thundercrab.data.model.AccountDraft
 import com.plausiden.thundercrab.data.model.ConnectResult
 import com.plausiden.thundercrab.data.model.DiagEvent
 import com.plausiden.thundercrab.data.model.Folder
+import com.plausiden.thundercrab.data.model.MessageBody
 import com.plausiden.thundercrab.data.model.MessageHeader
 import com.plausiden.thundercrab.data.model.RuleSuggestion
 
@@ -153,6 +154,15 @@ interface ThunderCrabRepository {
      */
     suspend fun savedRulesSieve(): Result<String>
 
-    // NOTE: fetchBody is DELIBERATELY ABSENT — no caller, no-body invariant (spec §5.1).
-    // NOTE: pushSieve/sendMessage remain out of scope here (AVP-2; no live push).
+    /**
+     * Fetch one message's body for display. Returns the plain-text part and the
+     * HTML part ALREADY SANITIZED by the core (scripts + all remote content
+     * removed — safe for a locked-down WebView). Uses BODY.PEEK, so reading a
+     * message does not itself mark it \Seen.
+     *
+     * Display-only: body content is never fed to the rules / suggestions /
+     * ledger spine. (Supersedes the former no-body invariant, lifted on the
+     * owner's "render received mail" decision.)
+     */
+    suspend fun fetchBody(folder: String, uid: Int): Result<MessageBody>
 }

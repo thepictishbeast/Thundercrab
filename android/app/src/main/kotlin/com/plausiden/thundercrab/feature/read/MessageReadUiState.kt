@@ -1,8 +1,8 @@
 // ============================================================================
 // feature/read/MessageReadUiState.kt  (VIEWMODEL group)
-// Header-only read state. NO body field by design — the body area is a fixed
-// DISABLED UI state in the Screen ("Message body not available in this build").
-// Never references fetchBody. Spec §5.1 / §2.1 / VIEWMODEL contracts.
+// Read state: cached header PLUS the fetched message body (display-only — the
+// body never feeds the rules/suggestions spine). The body's HTML is already
+// sanitized by the core and safe for a locked-down WebView.
 // ============================================================================
 package com.plausiden.thundercrab.feature.read
 
@@ -11,5 +11,14 @@ data class MessageReadUiState(
     val subject: String = "",
     val headers: List<Pair<String, String>> = emptyList(),
     val found: Boolean = false,
-    // NOTE: NO body field. Body is a fixed disabled UI state (spec §5.1).
+    /** If the sender requested a read receipt, the address; null otherwise. */
+    val readReceiptRequested: String? = null,
+    // --- Body display ---
+    val bodyLoading: Boolean = false,
+    /** Sanitized HTML to render in the WebView (preferred when present). */
+    val bodyHtml: String? = null,
+    /** Plain-text fallback (shown when there is no HTML part). */
+    val bodyPlain: String? = null,
+    /** Non-null if the body fetch failed. */
+    val bodyError: String? = null,
 )

@@ -12,6 +12,7 @@ import com.plausiden.thundercrab.data.model.ConnectResult
 import com.plausiden.thundercrab.data.model.DiagEvent
 import com.plausiden.thundercrab.data.model.ErrorKind
 import com.plausiden.thundercrab.data.model.Folder
+import com.plausiden.thundercrab.data.model.MessageBody
 import com.plausiden.thundercrab.data.model.MessageHeader
 import com.plausiden.thundercrab.data.model.RuleSuggestion
 import java.security.MessageDigest
@@ -28,6 +29,7 @@ import uniffi.thundercrab_ffi.FfiException
 import uniffi.thundercrab_ffi.FfiFlagEvent
 import uniffi.thundercrab_ffi.FfiFlagSource
 import uniffi.thundercrab_ffi.FfiHeaders
+import uniffi.thundercrab_ffi.FfiMessageBody
 import uniffi.thundercrab_ffi.FfiFolder
 import uniffi.thundercrab_ffi.FfiOutboundMessage
 import uniffi.thundercrab_ffi.renderMarkdown
@@ -132,6 +134,9 @@ class ThunderCrabRepositoryImpl(
     override fun headerFor(folder: String, uid: Int): MessageHeader? =
         headerCache[folder]?.firstOrNull { it.uid == uid }
 
+    override suspend fun fetchBody(folder: String, uid: Int): Result<MessageBody> =
+        guarded { c -> c.fetchBody(folder, uid.toUInt()).toDomain() }
+
     override suspend fun setFlag(folder: String, uid: Int, flag: String, set: Boolean): Result<Unit> =
         guarded { c ->
             c.setFlag(folder, uid.toUInt(), flag, set)
@@ -178,6 +183,8 @@ class ThunderCrabRepositoryImpl(
             // back to the source. Blank body → no HTML part (plain-only).
             body = body,
             htmlBody = body.ifBlank { null }?.let { renderMarkdown(it) },
+            // Read-receipt request is opt-in (compose toggle, wired separately).
+            readReceiptTo = null,
         )
         // STARTTLS on 587 (the plausiden default). Password is passed straight
         // to the FFI and never retained here.
@@ -346,6 +353,12 @@ class ThunderCrabRepositoryImpl(
     private fun FfiHeaders.toDomain() = MessageHeader(
         uid = uid.toInt(), folder = folder, from = from, subject = subject,
         otherHeaders = otherHeaders.map { it.name to it.value },
+        readReceiptRequested = readReceiptRequested,
+    )
+
+    private fun FfiMessageBody.toDomain() = MessageBody(
+        plain = plain,
+        htmlSanitized = htmlSanitized,
     )
 
     private fun AccountDraft.toFfi(): FfiAccountConfig? = try {
