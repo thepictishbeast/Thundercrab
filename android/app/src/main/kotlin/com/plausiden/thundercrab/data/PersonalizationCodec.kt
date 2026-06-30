@@ -12,14 +12,22 @@ import org.json.JSONObject
 object PersonalizationCodec {
     private const val VERSION = 1
 
-    /** Serialize the appearance (and, later, more) into the synced blob. */
-    fun encode(appearance: AppearancePrefs): String =
+    /** Serialize the synced personalization (appearance + signature, …) into the blob. */
+    fun encode(appearance: AppearancePrefs, signature: String): String =
         JSONObject()
             .put("v", VERSION)
             .put("themeMode", appearance.themeMode.name)
             .put("amoled", appearance.amoled)
             .put("dynamicColor", appearance.dynamicColor)
+            .put("signature", signature)
             .toString()
+
+    /** The synced signature, or null if the blob has none. */
+    fun decodeSignature(json: String): String? = try {
+        JSONObject(json).takeIf { it.has("signature") }?.getString("signature")
+    } catch (_: Exception) {
+        null
+    }
 
     /** Parse the appearance from a synced blob, or null if it's unusable. */
     fun decodeAppearance(json: String): AppearancePrefs? = try {

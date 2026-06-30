@@ -42,6 +42,7 @@ class SettingsViewModel(
     fun setSignature(s: String) {
         prefs.signature = s
         _signature.value = s
+        syncPersonalizationUp()
     }
 
     fun setThemeMode(mode: ThemeMode) { prefs.setThemeMode(mode); syncPersonalizationUp() }
@@ -57,13 +58,20 @@ class SettingsViewModel(
         viewModelScope.launch {
             val json = repo.getPersonalization().getOrNull() ?: return@launch
             PersonalizationCodec.decodeAppearance(json)?.let(prefs::applyAppearance)
+            // Apply the synced signature directly (no re-push, to avoid a loop).
+            PersonalizationCodec.decodeSignature(json)?.let { sig ->
+                prefs.signature = sig
+                _signature.value = sig
+            }
         }
     }
 
-    /** Push the current appearance to the user's mailbox (best-effort, fire-and-forget). */
+    /** Push the current personalization to the user's mailbox (best-effort, fire-and-forget). */
     private fun syncPersonalizationUp() {
         viewModelScope.launch {
-            repo.setPersonalization(PersonalizationCodec.encode(prefs.appearance.value))
+            repo.setPersonalization(
+                PersonalizationCodec.encode(prefs.appearance.value, prefs.signature),
+            )
         }
     }
 
