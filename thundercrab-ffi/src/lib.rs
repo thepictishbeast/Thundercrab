@@ -1063,6 +1063,37 @@ impl ThunderCrabClient {
         Ok(())
     }
 
+    /// Fetch a named synced blob (`key`: `personalization`, `rules`, …) from the
+    /// user's own mailbox via IMAP METADATA. Several independently-owned blobs
+    /// can sync without clobbering each other. `null` if unset / no METADATA.
+    ///
+    /// # Errors
+    /// `Protocol` on a malformed server response; `NotImplemented` if logged out.
+    pub async fn get_synced(&self, key: String) -> Result<Option<String>, FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+        Ok(tokio::time::timeout(OP_TIMEOUT, backend.get_synced(&key))
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "get_synced timed out".to_string(),
+            })??)
+    }
+
+    /// Store a named synced blob (`json`) under `key` as IMAP METADATA.
+    ///
+    /// # Errors
+    /// `Protocol` if `SETMETADATA` is rejected; `NotImplemented` if logged out.
+    pub async fn set_synced(&self, key: String, json: String) -> Result<(), FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+        tokio::time::timeout(OP_TIMEOUT, backend.set_synced(&key, &json))
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "set_synced timed out".to_string(),
+            })??;
+        Ok(())
+    }
+
     /// Move `uid` from `from_folder` to `to_folder` (the IMAP side of a
     /// recorded flag-event move).
     ///

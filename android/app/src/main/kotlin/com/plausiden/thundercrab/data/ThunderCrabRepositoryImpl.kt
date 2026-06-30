@@ -259,6 +259,24 @@ class ThunderCrabRepositoryImpl(
             ?: throw FfiException.InvalidInput("Suggestion no longer available; refresh and try again.")
         // The user explicitly accepted this rule -> mark provenance USER.
         ffiSaveRule(dbPath, rule.copy(origin = FfiRuleOrigin.USER))
+        pushRulesBestEffort()
+    }
+
+    /**
+     * Push the saved rules to the synced "rules" METADATA entry the instant they
+     * change. Best-effort: if not connected, it's skipped and the next
+     * [syncRulesDown] / push reconciles. Owned by the repo (rules are its data).
+     */
+    private suspend fun pushRulesBestEffort() {
+        val c = client ?: return
+        runCatching { exportRulesJson().getOrNull()?.let { c.setSynced("rules", it) } }
+    }
+
+    /** Pull the synced rules and upsert them locally (merge, never lossy). */
+    override suspend fun syncRulesDown(): Result<Unit> = ioCatching {
+        val c = client ?: return@ioCatching
+        c.getSynced("rules")?.let { importRulesJson(it).getOrThrow() }
+        Unit
     }
 
     override suspend fun loadSavedRules(): Result<List<RuleSuggestion>> = ioCatching {
@@ -266,7 +284,9 @@ class ThunderCrabRepositoryImpl(
     }
 
     override suspend fun deleteSavedRule(id: String): Result<Boolean> = ioCatching {
-        ffiDeleteRule(dbPath, id)
+        val removed = ffiDeleteRule(dbPath, id)
+        pushRulesBestEffort()
+        removed
     }
 
     override suspend fun exportRulesJson(): Result<String> = ioCatching {
@@ -321,6 +341,7 @@ class ThunderCrabRepositoryImpl(
             origin = FfiRuleOrigin.USER, // user-authored = highest trust
         )
         ffiSaveRule(dbPath, rule)
+        pushRulesBestEffort()
     }
 
     override suspend fun savedRulesSieve(): Result<String> = ioCatching {

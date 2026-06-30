@@ -56,24 +56,24 @@ class SettingsViewModel(
      */
     fun syncPersonalizationDown() {
         viewModelScope.launch {
-            val json = repo.getPersonalization().getOrNull() ?: return@launch
-            PersonalizationCodec.decodeAppearance(json)?.let(prefs::applyAppearance)
-            // Apply the synced signature directly (no re-push, to avoid a loop).
-            PersonalizationCodec.decodeSignature(json)?.let { sig ->
-                prefs.signature = sig
-                _signature.value = sig
+            repo.getPersonalization().getOrNull()?.let { json ->
+                PersonalizationCodec.decodeAppearance(json)?.let(prefs::applyAppearance)
+                // Apply the synced signature directly (no re-push, to avoid a loop).
+                PersonalizationCodec.decodeSignature(json)?.let { sig ->
+                    prefs.signature = sig
+                    _signature.value = sig
+                }
             }
-            // Upsert synced sorting rules into the local store (merge, never lossy).
-            PersonalizationCodec.decodeRulesJson(json)?.let { repo.importRulesJson(it) }
+            // Sorting rules sync via their own entry (and push themselves on change).
+            repo.syncRulesDown()
         }
     }
 
-    /** Push the current personalization to the user's mailbox (best-effort, fire-and-forget). */
+    /** Push the current appearance + signature to the user's mailbox (best-effort). */
     private fun syncPersonalizationUp() {
         viewModelScope.launch {
-            val rulesJson = repo.exportRulesJson().getOrDefault("[]")
             repo.setPersonalization(
-                PersonalizationCodec.encode(prefs.appearance.value, prefs.signature, rulesJson),
+                PersonalizationCodec.encode(prefs.appearance.value, prefs.signature),
             )
         }
     }

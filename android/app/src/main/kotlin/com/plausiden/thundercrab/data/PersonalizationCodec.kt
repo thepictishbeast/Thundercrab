@@ -7,29 +7,24 @@
 // ============================================================================
 package com.plausiden.thundercrab.data
 
-import org.json.JSONArray
 import org.json.JSONObject
 
 object PersonalizationCodec {
     private const val VERSION = 1
 
-    /** Serialize the synced personalization (appearance + signature + rules) into the blob. */
-    fun encode(appearance: AppearancePrefs, signature: String, rulesJson: String): String =
+    /**
+     * Serialize the appearance + signature personalization blob. (Sorting rules
+     * sync via their own "rules" METADATA entry so they can push the instant they
+     * change, independent of this blob.)
+     */
+    fun encode(appearance: AppearancePrefs, signature: String): String =
         JSONObject()
             .put("v", VERSION)
             .put("themeMode", appearance.themeMode.name)
             .put("amoled", appearance.amoled)
             .put("dynamicColor", appearance.dynamicColor)
             .put("signature", signature)
-            .put("rules", JSONArray(rulesJson))
             .toString()
-
-    /** The synced rules as a JSON-array string (for the repo to upsert), or null. */
-    fun decodeRulesJson(json: String): String? = try {
-        JSONObject(json).optJSONArray("rules")?.toString()
-    } catch (_: Exception) {
-        null
-    }
 
     /** The synced signature, or null if the blob has none. */
     fun decodeSignature(json: String): String? = try {

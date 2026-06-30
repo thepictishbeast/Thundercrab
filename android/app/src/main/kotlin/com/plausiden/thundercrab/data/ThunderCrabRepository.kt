@@ -164,6 +164,13 @@ interface ThunderCrabRepository {
     suspend fun importRulesJson(json: String): Result<Unit>
 
     /**
+     * Pull the synced rules from the user's mailbox ("rules" METADATA entry) and
+     * upsert them locally. Rules push themselves the instant they change; this is
+     * the pull side (call on app/settings open). No-op if not connected.
+     */
+    suspend fun syncRulesDown(): Result<Unit>
+
+    /**
      * Emit the personal Sieve script (RFC 5228) for the currently saved rules:
      * loads the rules then renders them. Pure preview — NEVER pushed to a server
      * (AVP-2 guardrail). Returns the script text for read-only display.
