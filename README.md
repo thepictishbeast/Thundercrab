@@ -68,6 +68,26 @@ Privacy invariants enforced in code (see `thundercrab-suggestions/src/safety.rs`
 - `submitted_at_day` is days-since-epoch, not minute-precision — defends
   against timing-based traffic analysis.
 
+## Capabilities
+
+Secure + private by construction, across the CLI, Android app, and Rust core:
+
+- **Real-time push** — a dedicated IMAP `IDLE` connection (RFC 2177); on
+  Android a foreground service with the password encrypted in the Android
+  Keystore (AES-256-GCM, key never leaves secure hardware).
+- **Safe HTML mail** — received HTML is sanitized with Ammonia *and* all remote
+  content is stripped (no tracking pixels), then shown in a locked-down WebView
+  (JavaScript off, network blocked). Compose in **Markdown**, sent as
+  `multipart/alternative` (rendered HTML + plain-text fallback).
+- **Read receipts** (RFC 8098) — *requesting* one is opt-in; ThunderCrab never
+  *auto-responds* (an auto-MDN leaks read-state, time, and IP).
+- **Sovereign personalization sync** — appearance, signature, and sorting rules
+  sync across devices via private IMAP `METADATA` on **your own mailbox**
+  (RFC 5464): no sync server, no extra account, nothing for a third party to see
+  or correlate.
+- **Post-quantum TLS** — X25519MLKEM768 hybrid key exchange on every
+  IMAP / SMTP / ManageSieve connection.
+
 ## Layout
 
 ```
