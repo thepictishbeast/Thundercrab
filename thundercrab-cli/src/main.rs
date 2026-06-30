@@ -240,9 +240,9 @@ async fn cmd_search(cfg: &AccountConfig, password: &str, folder: &str, term: &st
     let backend = RustImapBackend::connect(cfg, password)
         .await
         .map_err(|e| anyhow!("connect: {e}"))?;
-    // Build a safe IMAP SEARCH quoted-string (escape `\` then `"`).
-    let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
-    let query = format!("TEXT \"{escaped}\"");
+    // Build a safe IMAP SEARCH criterion (strips control chars to block CRLF
+    // injection, escapes quoted-specials). Single tested helper in the core.
+    let query = thundercrab_imap::rust_imap::text_search_criterion(term);
     let hits = backend
         .search(folder, &query)
         .await

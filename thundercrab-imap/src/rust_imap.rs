@@ -534,6 +534,23 @@ impl Backend for RustImapBackend {
     }
 }
 
+/// Turn a plain, possibly-hostile search term into a safe IMAP `TEXT "<term>"`
+/// search criterion.
+///
+/// Security: IMAP quoted strings (RFC 3501 §4.3) may not contain CR, LF, or NUL
+/// — a term carrying those could otherwise terminate the command line and inject
+/// a second IMAP command (CRLF / IMAP injection). We therefore **strip all
+/// control characters first**, then escape the quoted-specials `\` and `"`. The
+/// result is always a single, well-formed quoted string. Callers (the CLI and
+/// the FFI surface) MUST route user input through here rather than building the
+/// criterion by hand, so the escaping lives in exactly one tested place.
+#[must_use]
+pub fn text_search_criterion(term: &str) -> String {
+    let cleaned: String = term.chars().filter(|c| !c.is_control()).collect();
+    let escaped = cleaned.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("TEXT \"{escaped}\"")
+}
+
 /// Build a [`MessageHeaders`] from one `FETCH` reply (UID + ENVELOPE +
 /// `BODY.PEEK[HEADER]`). Shared by `fetch_headers` and `search` so both surface
 /// identical header summaries.
@@ -627,6 +644,29 @@ fn push_if_relevant(acc: &mut Vec<(String, String)>, name: String, value: String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_criterion_escapes_quoted_specials() {
+        assert_eq!(text_search_criterion("invoice"), r#"TEXT "invoice""#);
+        // backslash and double-quote must be escaped inside the quoted string
+        assert_eq!(text_search_criterion(r#"a"b\c"#), r#"TEXT "a\"b\\c""#);
+    }
+
+    #[test]
+    fn search_criterion_strips_crlf_injection() {
+        // A term carrying CRLF must NOT be able to terminate the command line
+        // and inject a second IMAP command. Control chars are stripped entirely,
+        // leaving a single well-formed quoted string with no CR/LF.
+        let hostile = "foo\"\r\nA001 DELETE INBOX\r\n";
+        let crit = text_search_criterion(hostile);
+        assert!(!crit.contains('\r') && !crit.contains('\n'), "no raw CR/LF");
+        assert_eq!(crit, r#"TEXT "foo\"A001 DELETE INBOX""#);
+        // exactly two unescaped quotes: the opening and closing of the string
+        let unescaped_quotes = crit.match_indices('"')
+            .filter(|(i, _)| *i == 0 || crit.as_bytes()[i - 1] != b'\\')
+            .count();
+        assert_eq!(unescaped_quotes, 2);
+    }
 
     #[test]
     fn parses_simple_headers() {

@@ -1030,10 +1030,10 @@ impl ThunderCrabClient {
             async {
                 let guard = self.inner.lock().await;
                 let backend = guard.as_ref().ok_or_else(client_gone)?;
-                // Escape `\` then `"` so the term can't break out of the quoted
-                // IMAP string (mirrors the `crab search` CLI path).
-                let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
-                let query = format!("TEXT \"{escaped}\"");
+                // Build the criterion via the core's single tested helper: it
+                // strips control chars (blocks CRLF / IMAP injection) and escapes
+                // quoted-specials, so the UI never constructs raw IMAP syntax.
+                let query = thundercrab_imap::rust_imap::text_search_criterion(&term);
                 let headers = tokio::time::timeout(OP_TIMEOUT, backend.search(&folder, &query))
                     .await
                     .map_err(|_| FfiError::Transport {
