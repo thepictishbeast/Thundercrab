@@ -20,7 +20,14 @@ tracing-subscriber.workspace = true
 # no WebView), single binary per platform (Linux/macOS/Windows),
 # Elm architecture so every state transition is compile-time
 # typed. We pay in compile time + binary size; both bounded.
-iced = { version = "0.14", default-features = false, features = ["tokio", "advanced"] }
+# `x11` + `wayland` enable winit's Linux backends (dlopen — no system headers
+# needed to compile); without them winit's platform Window is uninhabited and
+# fails to type-check. `tiny-skia` is the pure-CPU renderer (no GPU libs).
+# `markdown` is iced's native CommonMark widget — renders mail bodies with real
+# formatting and NO WebView (honors the no-WebView pick).
+iced = { version = "0.14", default-features = false, features = [
+    "tokio", "advanced", "markdown", "tiny-skia", "x11", "wayland",
+] }
 
 [lints]
 workspace = true

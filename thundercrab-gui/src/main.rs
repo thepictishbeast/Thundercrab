@@ -67,9 +67,18 @@ pub fn main() -> iced::Result {
         .compact()
         .init();
 
-    iced::application("ThunderCrab", App::update, App::view)
-        .theme(|_| Theme::Light)
+    iced::application(App::default, App::update, App::view)
+        .title("ThunderCrab")
+        .theme(theme)
         .run()
+}
+
+/// Fixed light theme. A named fn (not a closure) so the `&App` lifetime is
+/// universally quantified — a closure here infers one specific lifetime and
+/// trips iced's `for<'a>` theme bound ("implementation of `Fn` is not general
+/// enough").
+fn theme(_state: &App) -> Theme {
+    Theme::Light
 }
 
 /// App state. Single struct; transitions are pure functions of
