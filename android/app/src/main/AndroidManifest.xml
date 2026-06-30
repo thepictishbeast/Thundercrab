@@ -4,6 +4,12 @@
     <!-- Network access for IMAP/SMTP/Sieve via the Rust core. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Background IMAP IDLE push: a foreground "data sync" service holds the
+         connection open; POST_NOTIFICATIONS surfaces new-mail alerts (API 33+). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name="com.plausiden.thundercrab.ThunderCrabApp"
         android:allowBackup="false"
@@ -24,6 +30,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Background IMAP IDLE watcher. Not exported — started only by the app. -->
+        <service
+            android:name="com.plausiden.thundercrab.service.IdleService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 
