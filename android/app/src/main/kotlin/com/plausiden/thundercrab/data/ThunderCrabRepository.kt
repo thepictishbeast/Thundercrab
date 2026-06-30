@@ -40,6 +40,14 @@ interface ThunderCrabRepository {
      */
     suspend fun fetchHeaders(folder: String, limit: Int = 50): Result<List<MessageHeader>>
 
+    /**
+     * Server-side full-text search of `folder` for `term` (IMAP `SEARCH TEXT`,
+     * headers + body), newest first. `term` is plain text — the core wraps it
+     * safely. Read-only: searching never marks messages read. Caches the hits
+     * per folder so the MessageRead screen can open a result without a re-fetch.
+     */
+    suspend fun search(folder: String, term: String): Result<List<MessageHeader>>
+
     /** Cached header lookup for the MessageRead screen. Null if not yet fetched. */
     fun headerFor(folder: String, uid: Int): MessageHeader?
 

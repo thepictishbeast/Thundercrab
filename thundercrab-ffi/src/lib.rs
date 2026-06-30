@@ -1009,6 +1009,59 @@ impl ThunderCrabClient {
         .await
     }
 
+    /// Search `folder` for `term`, returning header summaries for the matches
+    /// (newest UID first). `term` is a plain string from the UI; the core wraps
+    /// it in a safe IMAP `TEXT "<term>"` criterion (server-side full-text over
+    /// headers + body), so callers never construct raw IMAP query syntax.
+    /// Read-only (`EXAMINE`) — searching never marks anything read.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn search(
+        &self,
+        folder: String,
+        term: String,
+    ) -> Result<Vec<FfiHeaders>, FfiError> {
+        timed(
+            "search",
+            DiagKind::FetchHeadersOk,
+            DiagKind::FetchHeadersFail,
+            |v: &Vec<FfiHeaders>| u64::try_from(v.len()).unwrap_or(u64::MAX),
+            async {
+                let guard = self.inner.lock().await;
+                let backend = guard.as_ref().ok_or_else(client_gone)?;
+                // Escape `\` then `"` so the term can't break out of the quoted
+                // IMAP string (mirrors the `crab search` CLI path).
+                let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
+                let query = format!("TEXT \"{escaped}\"");
+                let headers = tokio::time::timeout(OP_TIMEOUT, backend.search(&folder, &query))
+                    .await
+                    .map_err(|_| FfiError::Transport {
+                        detail: "search timed out".to_string(),
+                    })??;
+                Ok(headers
+                    .into_iter()
+                    .map(|h| {
+                        let read_receipt_requested = h.read_receipt_requested().map(String::from);
+                        FfiHeaders {
+                            uid: h.uid,
+                            folder: h.folder,
+                            from: h.from,
+                            subject: h.subject,
+                            other_headers: h
+                                .other_headers
+                                .into_iter()
+                                .map(|(name, value)| FfiHeader { name, value })
+                                .collect(),
+                            read_receipt_requested,
+                        }
+                    })
+                    .collect())
+            },
+        )
+        .await
+    }
+
     /// Fetch one message's full body, returning display-ready parts: the
     /// plain-text body and the HTML body ALREADY SANITIZED by the core
     /// (scripts + all remote content removed — safe to render in a `WebView`).

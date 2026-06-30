@@ -131,6 +131,19 @@ class ThunderCrabRepositoryImpl(
             headers
         }
 
+    override suspend fun search(folder: String, term: String): Result<List<MessageHeader>> =
+        guarded { c ->
+            val hits = c.search(folder, term).map { it.toDomain() }
+            // Merge hits into the cache (don't clobber a full fetch) so opening a
+            // result still resolves its header via headerFor without a re-fetch.
+            val merged = headerCache[folder].orEmpty()
+                .associateBy { it.uid }
+                .toMutableMap()
+            hits.forEach { merged[it.uid] = it }
+            headerCache[folder] = merged.values.sortedByDescending { it.uid }
+            hits
+        }
+
     override fun headerFor(folder: String, uid: Int): MessageHeader? =
         headerCache[folder]?.firstOrNull { it.uid == uid }
 

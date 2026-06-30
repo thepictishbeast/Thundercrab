@@ -21,10 +21,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,6 +76,8 @@ fun MessageListScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var moveTargetUid by remember { mutableStateOf<Int?>(null) }
+    var searchActive by remember { mutableStateOf(false) }
+    var queryText by remember { mutableStateOf("") }
 
     LaunchedEffect(state.errorMessage) {
         val msg = state.errorMessage
@@ -100,6 +107,20 @@ fun MessageListScreen(
                         )
                     }
                 },
+                actions = {
+                    IconButton(onClick = {
+                        searchActive = !searchActive
+                        if (!searchActive) {
+                            queryText = ""
+                            if (state.isSearchResult) viewModel.clearSearch()
+                        }
+                    }) {
+                        Icon(
+                            imageVector = if (searchActive) Icons.Filled.Close else Icons.Filled.Search,
+                            contentDescription = if (searchActive) "Close search" else "Search mailbox",
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -114,36 +135,58 @@ fun MessageListScreen(
             }
         },
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            when {
-                state.loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-
-                state.messages.isEmpty() -> EmptyOrError(
-                    errorMessage = state.errorMessage,
-                    onRetry = viewModel::refresh,
-                    modifier = Modifier.align(Alignment.Center),
+            if (searchActive) {
+                SearchField(
+                    value = queryText,
+                    onValueChange = { queryText = it },
+                    onSubmit = { viewModel.onSearch(queryText) },
+                    onClear = {
+                        queryText = ""
+                        if (state.isSearchResult) viewModel.clearSearch()
+                    },
                 )
+            }
+            if (state.isSearchResult && !state.loading) {
+                Text(
+                    text = "${state.messages.size} result(s) for “${state.query}”",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+            Box(modifier = Modifier.fillMaxSize()) {
+                when {
+                    state.loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
 
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(items = state.messages, key = { it.uid }) { header ->
-                        MessageRow(
-                            header = header,
-                            onClick = { onMessageClick(header.uid) },
-                            onMarkSeen = { viewModel.onToggleSeen(header.uid, true) },
-                            onMarkUnseen = { viewModel.onToggleSeen(header.uid, false) },
-                            onFlag = { viewModel.onToggleFlagged(header.uid, true) },
-                            onUnflag = { viewModel.onToggleFlagged(header.uid, false) },
-                            onMove = { moveTargetUid = header.uid },
-                        )
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                            thickness = 0.5.dp,
-                            modifier = Modifier.padding(start = 74.dp),
-                        )
+                    state.messages.isEmpty() -> EmptyOrError(
+                        errorMessage = state.errorMessage,
+                        isSearchResult = state.isSearchResult,
+                        onRetry = viewModel::refresh,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+
+                    else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(items = state.messages, key = { it.uid }) { header ->
+                            MessageRow(
+                                header = header,
+                                onClick = { onMessageClick(header.uid) },
+                                onMarkSeen = { viewModel.onToggleSeen(header.uid, true) },
+                                onMarkUnseen = { viewModel.onToggleSeen(header.uid, false) },
+                                onFlag = { viewModel.onToggleFlagged(header.uid, true) },
+                                onUnflag = { viewModel.onToggleFlagged(header.uid, false) },
+                                onMove = { moveTargetUid = header.uid },
+                            )
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                thickness = 0.5.dp,
+                                modifier = Modifier.padding(start = 74.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -250,24 +293,65 @@ private fun MoveDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EmptyOrError(errorMessage: String?, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun SearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onClear: () -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        placeholder = { Text("Search this mailbox") },
+        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+        trailingIcon = {
+            if (value.isNotEmpty()) {
+                IconButton(onClick = onClear) {
+                    Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                }
+            }
+        },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+    )
+}
+
+@Composable
+private fun EmptyOrError(
+    errorMessage: String?,
+    isSearchResult: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (errorMessage != null) {
-            Text("Couldn't load messages", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
-            Text(
-                text = errorMessage,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            Text("No messages in this mailbox.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        when {
+            errorMessage != null -> {
+                Text("Couldn't load messages", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(onClick = onRetry) { Text("Refresh") }
+            }
+            isSearchResult -> {
+                Text("No messages matched your search.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            else -> {
+                Text("No messages in this mailbox.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = onRetry) { Text("Refresh") }
+            }
         }
-        Button(onClick = onRetry) { Text("Refresh") }
     }
 }

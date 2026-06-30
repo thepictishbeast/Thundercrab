@@ -34,7 +34,7 @@ class MessageListViewModel(
     }
 
     fun refresh() {
-        _uiState.update { it.copy(loading = true) }
+        _uiState.update { it.copy(loading = true, query = "", isSearchResult = false) }
         viewModelScope.launch {
             repo.fetchHeaders(folder, MESSAGE_LIMIT).fold(
                 onSuccess = { headers ->
@@ -44,6 +44,29 @@ class MessageListViewModel(
             )
         }
     }
+
+    /** Server-side full-text search of this folder. Blank term restores the listing. */
+    fun onSearch(term: String) {
+        val trimmed = term.trim()
+        if (trimmed.isEmpty()) {
+            refresh()
+            return
+        }
+        _uiState.update { it.copy(loading = true, query = trimmed) }
+        viewModelScope.launch {
+            repo.search(folder, trimmed).fold(
+                onSuccess = { hits ->
+                    _uiState.update {
+                        it.copy(loading = false, messages = hits, isSearchResult = true)
+                    }
+                },
+                onFailure = { e -> applyError(e) },
+            )
+        }
+    }
+
+    /** Clear the search and return to the full folder listing. */
+    fun clearSearch() = refresh()
 
     /** Toggle the \Seen flag, then refresh on success. */
     fun onToggleSeen(uid: Int, seen: Boolean) = launchFlag(uid, "\\Seen", seen)

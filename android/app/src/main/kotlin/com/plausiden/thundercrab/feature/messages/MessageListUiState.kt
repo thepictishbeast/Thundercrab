@@ -12,6 +12,10 @@ data class MessageListUiState(
     val folder: String,
     val loading: Boolean = true,
     val messages: List<MessageHeader> = emptyList(),
+    /** Current search term; blank means "showing the normal folder listing". */
+    val query: String = "",
+    /** True while a search result set (not the full folder) is on screen. */
+    val isSearchResult: Boolean = false,
     val errorKind: ErrorKind? = null,
     val errorMessage: String? = null,
 )
