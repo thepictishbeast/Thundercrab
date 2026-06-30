@@ -413,6 +413,10 @@ pub struct FfiHeaders {
     pub subject: String,
     /// Additional captured headers (`List-Id`, `List-Unsubscribe`, etc.).
     pub other_headers: Vec<FfiHeader>,
+    /// If the sender requested a read receipt (RFC 8098), the address it should
+    /// go to; otherwise null. The UI surfaces this; ThunderCrab never
+    /// auto-responds.
+    pub read_receipt_requested: Option<String>,
 }
 
 /// A received message's display body. The HTML part is ALREADY SANITIZED by the
@@ -471,6 +475,9 @@ pub struct FfiOutboundMessage {
     /// `multipart/alternative` so HTML-capable clients render it and others
     /// fall back to `body`. The caller is responsible for sanitizing it.
     pub html_body: Option<String>,
+    /// When set, request a read receipt (RFC 8098) to this address — usually
+    /// the sender's own. Opt-in per message; null requests nothing.
+    pub read_receipt_to: Option<String>,
 }
 
 // =============================================================================
@@ -811,6 +818,7 @@ pub async fn send_message(
         subject: message.subject.as_str(),
         body: message.body.as_str(),
         html_body: message.html_body.as_deref(),
+        read_receipt_to: message.read_receipt_to.as_deref(),
     };
     timed(
         "send_message",
@@ -978,16 +986,22 @@ impl ThunderCrabClient {
                         })??;
                 Ok(headers
                     .into_iter()
-                    .map(|h| FfiHeaders {
-                        uid: h.uid,
-                        folder: h.folder,
-                        from: h.from,
-                        subject: h.subject,
-                        other_headers: h
-                            .other_headers
-                            .into_iter()
-                            .map(|(name, value)| FfiHeader { name, value })
-                            .collect(),
+                    .map(|h| {
+                        // Compute before `other_headers` is moved out below.
+                        let read_receipt_requested =
+                            h.read_receipt_requested().map(String::from);
+                        FfiHeaders {
+                            uid: h.uid,
+                            folder: h.folder,
+                            from: h.from,
+                            subject: h.subject,
+                            other_headers: h
+                                .other_headers
+                                .into_iter()
+                                .map(|(name, value)| FfiHeader { name, value })
+                                .collect(),
+                            read_receipt_requested,
+                        }
                     })
                     .collect())
             },

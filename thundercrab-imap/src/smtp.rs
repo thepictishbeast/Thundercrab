@@ -29,12 +29,35 @@
 //!   pooling internally, but ThunderCrab's GUI submits one at a
 //!   time anyway).
 
+use lettre::message::header::{Header, HeaderName, HeaderValue};
 use lettre::message::{Mailbox, MultiPart};
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncTransport, Message, Tokio1Executor};
 
 use crate::{AccountConfig, BackendError};
+
+/// RFC 8098 read-receipt request header. When present, a conforming recipient
+/// MAY (with the user's consent) return a Message Disposition Notification to
+/// the given address. ThunderCrab only ever *requests* receipts when the sender
+/// opts in; it never auto-sends one in response (that would leak read-state +
+/// IP, the same tracking we block).
+#[derive(Clone)]
+struct DispositionNotificationTo(String);
+
+impl Header for DispositionNotificationTo {
+    fn name() -> HeaderName {
+        HeaderName::new_from_ascii_str("Disposition-Notification-To")
+    }
+
+    fn parse(s: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(Self(s.to_owned()))
+    }
+
+    fn display(&self) -> HeaderValue {
+        HeaderValue::new(Self::name(), self.0.clone())
+    }
+}
 
 /// TLS strategy for the SMTP submission connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +96,11 @@ pub struct OutboundMessage<'a> {
     /// (e.g. rendering ThunderCrab Markdown through a sanitizing pipeline).
     /// This module does not sanitize — it only frames the parts.
     pub html_body: Option<&'a str>,
+    /// When `Some(addr)`, request a read receipt (RFC 8098): adds a
+    /// `Disposition-Notification-To: <addr>` header so a conforming recipient
+    /// can return a Message Disposition Notification to `addr`. Opt-in per
+    /// message — `None` requests nothing. Typically the sender's own address.
+    pub read_receipt_to: Option<&'a str>,
 }
 
 /// Connect, authenticate, send one message, close the transport.
@@ -140,6 +168,11 @@ fn build_message(message: &OutboundMessage<'_>) -> Result<Message, BackendError>
     for cc in message.cc {
         builder = builder.cc(parse_mailbox(cc)?);
     }
+    if let Some(addr) = message.read_receipt_to {
+        // Validate it as a real mailbox before asking recipients to notify it.
+        parse_mailbox(addr)?;
+        builder = builder.header(DispositionNotificationTo(addr.to_string()));
+    }
 
     let composed = match message.html_body {
         // text/plain first, text/html second: per MIME, clients render the
@@ -191,6 +224,7 @@ mod tests {
             subject: "hi",
             body,
             html_body: html,
+            read_receipt_to: None,
         }
     }
 
@@ -232,7 +266,37 @@ mod tests {
             subject: "hi",
             body: "x",
             html_body: None,
+            read_receipt_to: None,
         };
         assert!(build_message(&bad).is_err());
+    }
+
+    #[test]
+    fn read_receipt_adds_disposition_notification_header() {
+        let mut m = msg("body", None);
+        m.read_receipt_to = Some("sender@example.com");
+        let wire = String::from_utf8(build_message(&m).expect("builds").formatted()).expect("utf8");
+        assert!(
+            wire.contains("Disposition-Notification-To:"),
+            "MDN request header present:\n{wire}"
+        );
+        assert!(wire.contains("sender@example.com"), "notify address present");
+    }
+
+    #[test]
+    fn no_read_receipt_by_default() {
+        let wire = String::from_utf8(build_message(&msg("body", None)).expect("builds").formatted())
+            .expect("utf8");
+        assert!(
+            !wire.contains("Disposition-Notification-To"),
+            "no MDN request unless opted in:\n{wire}"
+        );
+    }
+
+    #[test]
+    fn read_receipt_rejects_bad_address() {
+        let mut m = msg("body", None);
+        m.read_receipt_to = Some("not an address");
+        assert!(build_message(&m).is_err(), "invalid notify address rejected");
     }
 }

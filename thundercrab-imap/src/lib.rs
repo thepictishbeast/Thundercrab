@@ -152,6 +152,20 @@ pub struct MessageHeaders {
     pub other_headers: Vec<(String, String)>,
 }
 
+impl MessageHeaders {
+    /// The `Disposition-Notification-To` address if the sender requested a read
+    /// receipt (RFC 8098), else `None`. ThunderCrab surfaces this to the user so
+    /// they can choose to acknowledge — it never auto-responds, since returning
+    /// a Message Disposition Notification leaks read-state, time, and IP.
+    #[must_use]
+    pub fn read_receipt_requested(&self) -> Option<&str> {
+        self.other_headers
+            .iter()
+            .find(|(name, _)| name == "disposition-notification-to")
+            .map(|(_, value)| value.as_str())
+    }
+}
+
 /// Backend-agnostic mailbox operations.
 ///
 /// BUG ASSUMPTION: All methods are async and assume the underlying

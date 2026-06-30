@@ -81,6 +81,10 @@ enum Cmd {
         /// to read from a file.
         #[arg(long)]
         html: Option<String>,
+        /// Request a read receipt (RFC 8098 `Disposition-Notification-To`),
+        /// addressed to the sending account. Opt-in; recipients may ignore it.
+        #[arg(long)]
+        read_receipt: bool,
         /// Submission flavor — `starttls` (port 587) or `implicit` (port 465).
         #[arg(long, default_value = "starttls")]
         encryption: String,
@@ -123,6 +127,7 @@ async fn run(cli: Cli) -> Result<()> {
             subject,
             body,
             html,
+            read_receipt,
             encryption,
         } => {
             cmd_send(
@@ -133,6 +138,7 @@ async fn run(cli: Cli) -> Result<()> {
                 &subject,
                 &body,
                 html.as_deref(),
+                read_receipt,
                 &encryption,
             )
             .await
@@ -216,6 +222,7 @@ async fn cmd_send(
     subject: &str,
     body: &str,
     html: Option<&str>,
+    read_receipt: bool,
     encryption: &str,
 ) -> Result<()> {
     if to.is_empty() {
@@ -242,6 +249,8 @@ async fn cmd_send(
         subject,
         body: &body_owned,
         html_body: html_owned.as_deref(),
+        // Request the receipt to the sending account when --read-receipt is set.
+        read_receipt_to: read_receipt.then_some(from),
     };
     let enc = match encryption {
         "starttls" => SmtpEncryption::StartTls,
