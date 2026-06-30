@@ -67,6 +67,18 @@ enum Cmd {
         /// Text to search for.
         term: String,
     },
+    /// Save one attachment from a message to a local file. Get the index
+    /// from `read` (the `[N]` in the attachments list).
+    SaveAttachment {
+        /// Folder name (e.g., `INBOX`).
+        folder: String,
+        /// IMAP UID of the message.
+        uid: u32,
+        /// Attachment index as shown by `read` (0-based).
+        index: usize,
+        /// Destination file path.
+        out: std::path::PathBuf,
+    },
     /// Push a Sieve script and set it active. Reads the script body
     /// from `path`. Empty file = clear-the-rules.
     PushSieve {
@@ -136,6 +148,9 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Fetch { folder, limit } => cmd_fetch(&cfg, &password, &folder, limit).await,
         Cmd::Read { folder, uid } => cmd_read(&cfg, &password, &folder, uid).await,
         Cmd::Search { folder, term } => cmd_search(&cfg, &password, &folder, &term).await,
+        Cmd::SaveAttachment { folder, uid, index, out } => {
+            cmd_save_attachment(&cfg, &password, &folder, uid, index, &out).await
+        }
         Cmd::PushSieve { name, path } => cmd_push_sieve(&cfg, &password, &name, &path).await,
         Cmd::Send {
             to,
@@ -232,6 +247,14 @@ async fn cmd_read(cfg: &AccountConfig, password: &str, folder: &str, uid: u32) -
             html.len()
         );
     }
+    if !body.attachments.is_empty() {
+        println!("\nattachments ({}):", body.attachments.len());
+        for (i, a) in body.attachments.iter().enumerate() {
+            let name = if a.filename.is_empty() { "(unnamed)" } else { &a.filename };
+            println!("  [{i}] {name}  {}  {} bytes", a.mime_type, a.size());
+        }
+        println!("  save with: crab save-attachment {folder} {uid} <index> <out-path>");
+    }
     backend.logout().await;
     Ok(())
 }
@@ -256,6 +279,38 @@ async fn cmd_search(cfg: &AccountConfig, password: &str, folder: &str, term: &st
             println!("    subject: {}", h.subject);
         }
     }
+    backend.logout().await;
+    Ok(())
+}
+
+async fn cmd_save_attachment(
+    cfg: &AccountConfig,
+    password: &str,
+    folder: &str,
+    uid: u32,
+    index: usize,
+    out: &std::path::Path,
+) -> Result<()> {
+    let backend = RustImapBackend::connect(cfg, password)
+        .await
+        .map_err(|e| anyhow!("connect: {e}"))?;
+    let body = backend
+        .fetch_body(folder, uid)
+        .await
+        .map_err(|e| anyhow!("fetch_body: {e}"))?;
+    let att = body.attachments.get(index).ok_or_else(|| {
+        anyhow!(
+            "no attachment at index {index}; message has {}",
+            body.attachments.len()
+        )
+    })?;
+    // `out` is a path the operator typed on their own command line (a clap
+    // positional), exactly like `curl -o` or `cp` — writing there is the whole
+    // point of the command. OS file permissions are the access control; we do
+    // not restrict where the user may save their own mail.
+    std::fs::write(out, &att.bytes)
+        .with_context(|| format!("writing attachment to {}", out.display()))?;
+    println!("ok: wrote {} bytes to {}", att.size(), out.display());
     backend.logout().await;
     Ok(())
 }

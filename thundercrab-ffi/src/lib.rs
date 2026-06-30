@@ -429,6 +429,23 @@ pub struct FfiMessageBody {
     /// Sanitized HTML body (a real text/html part, or the text converted to
     /// HTML), safe to render. Null only when there is no renderable body.
     pub html_sanitized: Option<String>,
+    /// Attachment metadata, in document order. Bytes are NOT included here (to
+    /// keep this payload light) — fetch them on demand with `fetch_attachment`
+    /// using the attachment's index in this list.
+    pub attachments: Vec<FfiAttachment>,
+}
+
+/// Metadata for one attachment. Bytes are fetched separately via
+/// [`ThunderCrabClient::fetch_attachment`] so listing a message body stays cheap
+/// even when it carries large files.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiAttachment {
+    /// Declared filename; empty when the part is unnamed.
+    pub filename: String,
+    /// MIME type as `type/subtype` (e.g. `image/png`).
+    pub mime_type: String,
+    /// Decoded size in bytes.
+    pub size: u64,
 }
 
 // =============================================================================
@@ -1080,7 +1097,49 @@ impl ThunderCrabClient {
         Ok(FfiMessageBody {
             plain: body.plain,
             html_sanitized: body.html_sanitized,
+            attachments: body
+                .attachments
+                .iter()
+                .map(|a| FfiAttachment {
+                    filename: a.filename.clone(),
+                    mime_type: a.mime_type.clone(),
+                    size: a.size() as u64,
+                })
+                .collect(),
         })
+    }
+
+    /// Fetch the decoded bytes of one attachment by its index in the message's
+    /// `attachments` list (from [`Self::fetch_body`]). Kept separate from
+    /// `fetch_body` so listing a message stays cheap regardless of attachment
+    /// size. Uses `BODY.PEEK`, so it does not mark the message read.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `InvalidInput` if `index` is out of range;
+    /// `NotImplemented` if already logged out.
+    pub async fn fetch_attachment(
+        &self,
+        folder: String,
+        uid: u32,
+        index: u32,
+    ) -> Result<Vec<u8>, FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+        let body = tokio::time::timeout(OP_TIMEOUT, backend.fetch_body(&folder, uid))
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "fetch_attachment timed out".to_string(),
+            })??;
+        let idx = index as usize;
+        body.attachments
+            .get(idx)
+            .map(|a| a.bytes.clone())
+            .ok_or_else(|| FfiError::InvalidInput {
+                detail: format!(
+                    "no attachment at index {idx}; message has {}",
+                    body.attachments.len()
+                ),
+            })
     }
 
     /// Fetch the synced personalization blob (RFC 5464 IMAP METADATA on the

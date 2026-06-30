@@ -6,9 +6,33 @@
 //! (via [`thundercrab_core::mail_html::sanitize_html`]) before it leaves this
 //! module, so no consumer can ever render unsafe or network-reaching HTML.
 
+use mail_parser::MimeHeaders;
 use thundercrab_core::mail_html::sanitize_html;
 
-/// The display body of a received message. Either part may be absent.
+/// One attachment carried by a message: metadata plus the decoded bytes.
+/// Bytes are content-transfer-decoded by `mail-parser`, so they are the real
+/// file contents ready to write to disk.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Attachment {
+    /// The declared filename (from Content-Disposition / Content-Type `name`).
+    /// Empty when the part is unnamed — consumers should synthesize one.
+    pub filename: String,
+    /// MIME type as `type/subtype`, lowercased (e.g. `image/png`). Falls back
+    /// to `application/octet-stream` when the part declares no content type.
+    pub mime_type: String,
+    /// The decoded attachment bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl Attachment {
+    /// Size of the decoded attachment in bytes.
+    #[must_use]
+    pub fn size(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+/// The display body of a received message. Either text part may be absent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageBody {
     /// `text/plain` part, decoded, as-is. `None` if the message has no text part.
@@ -19,6 +43,9 @@ pub struct MessageBody {
     /// text body converted to HTML (mail-parser's fallback). `None` only when
     /// the message has no renderable body at all.
     pub html_sanitized: Option<String>,
+    /// Attachments carried by the message, in document order. Empty when none.
+    /// The body's own text/html parts are NOT included here.
+    pub attachments: Vec<Attachment>,
 }
 
 /// Parse raw MIME bytes into a [`MessageBody`], extracting the primary
@@ -33,12 +60,33 @@ pub fn parse_body(raw: &[u8]) -> MessageBody {
     let Some(message) = mail_parser::MessageParser::default().parse(raw) else {
         return MessageBody::default();
     };
+    // mail-parser separates body parts from attachments, so iterating
+    // `attachments()` never double-counts the text/html body we extract above.
+    let attachments = message
+        .attachments()
+        .map(|part| {
+            let mime_type = part.content_type().map_or_else(
+                || "application/octet-stream".to_string(),
+                |ct| match ct.subtype() {
+                    Some(sub) => format!("{}/{}", ct.ctype(), sub).to_lowercase(),
+                    None => ct.ctype().to_lowercase(),
+                },
+            );
+            Attachment {
+                filename: part.attachment_name().unwrap_or_default().to_string(),
+                mime_type,
+                bytes: part.contents().to_vec(),
+            }
+        })
+        .collect();
+
     // `body_html` returns a real text/html part when present, else the text
     // body converted to HTML. Either way it is sanitized before return, so any
     // renderer receives safe, network-free HTML.
     MessageBody {
         plain: message.body_text(0).map(|c| c.into_owned()),
         html_sanitized: message.body_html(0).map(|c| sanitize_html(&c)),
+        attachments,
     }
 }
 
@@ -80,6 +128,34 @@ MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"X\"\r\n\r\n
             assert!(html.contains("just text"), "synthesized html carries the text: {html}");
             assert!(!html.to_lowercase().contains("<script"), "still sanitized: {html}");
         }
+    }
+
+    // multipart/mixed: a text body plus a small named binary attachment.
+    const WITH_ATTACHMENT: &[u8] = b"From: a@b.c\r\nTo: d@e.f\r\nSubject: doc\r\n\
+MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"M\"\r\n\r\n\
+--M\r\nContent-Type: text/plain\r\n\r\nsee attached\r\n\
+--M\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\n\
+Content-Disposition: attachment; filename=\"report.pdf\"\r\n\
+Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8gUERG\r\n\
+--M--\r\n";
+
+    #[test]
+    fn extracts_attachment_metadata_and_decoded_bytes() {
+        let b = parse_body(WITH_ATTACHMENT);
+        assert!(b.plain.as_deref().unwrap_or_default().contains("see attached"));
+        assert_eq!(b.attachments.len(), 1, "one attachment parsed");
+        let att = &b.attachments[0];
+        assert_eq!(att.filename, "report.pdf");
+        assert_eq!(att.mime_type, "application/pdf");
+        // base64 "SGVsbG8gUERG" decodes to "Hello PDF" — content-transfer-decoded.
+        assert_eq!(att.bytes, b"Hello PDF");
+        assert_eq!(att.size(), 9);
+    }
+
+    #[test]
+    fn body_without_attachments_has_empty_vec() {
+        let b = parse_body(MULTIPART);
+        assert!(b.attachments.is_empty(), "alternative parts are not attachments");
     }
 
     #[test]
