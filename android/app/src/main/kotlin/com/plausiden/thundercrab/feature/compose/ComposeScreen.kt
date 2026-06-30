@@ -9,6 +9,7 @@ package com.plausiden.thundercrab.feature.compose
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -61,6 +64,7 @@ fun ComposeScreen(
         mutableStateOf(if (viewModel.signature.isNotBlank()) "\n\n${viewModel.signature}" else "")
     }
     var askPassword by remember { mutableStateOf(false) }
+    var requestReceipt by remember { mutableStateOf(false) }
 
     LaunchedEffect(sent) { if (sent) onDone() }
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); viewModel.consumeError() } }
@@ -110,9 +114,20 @@ fun ComposeScreen(
                 value = body,
                 onValueChange = { body = it },
                 label = { Text("Message") },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                modifier = Modifier.fillMaxWidth(),
                 minLines = 8,
             )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Request read receipt",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = requestReceipt, onCheckedChange = { requestReceipt = it })
+            }
         }
     }
 
@@ -136,7 +151,7 @@ fun ComposeScreen(
             },
             confirmButton = {
                 TextButton(
-                    onClick = { askPassword = false; viewModel.send(pw, to, cc, subject, body) },
+                    onClick = { askPassword = false; viewModel.send(pw, to, cc, subject, body, requestReceipt) },
                     enabled = pw.isNotBlank(),
                 ) { Text("Send") }
             },

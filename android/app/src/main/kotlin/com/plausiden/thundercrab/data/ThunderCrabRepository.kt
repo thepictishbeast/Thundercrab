@@ -81,6 +81,8 @@ interface ThunderCrabRepository {
         cc: List<String>,
         subject: String,
         body: String,
+        /** Request a read receipt (RFC 8098) to the sending account. Opt-in. */
+        readReceipt: Boolean = false,
     ): Result<Unit>
 
     /**

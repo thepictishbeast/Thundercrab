@@ -35,7 +35,14 @@ class ComposeViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    fun send(password: String, to: String, cc: String, subject: String, body: String) {
+    fun send(
+        password: String,
+        to: String,
+        cc: String,
+        subject: String,
+        body: String,
+        readReceipt: Boolean = false,
+    ) {
         _sending.value = true
         viewModelScope.launch {
             repo.sendMessage(
@@ -44,6 +51,7 @@ class ComposeViewModel(
                 cc = splitAddrs(cc),
                 subject = subject,
                 body = body,
+                readReceipt = readReceipt,
             ).fold(
                 onSuccess = { _sent.value = true },
                 onFailure = { e ->

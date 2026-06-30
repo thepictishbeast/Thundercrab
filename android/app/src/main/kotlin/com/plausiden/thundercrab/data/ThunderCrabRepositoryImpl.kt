@@ -167,6 +167,7 @@ class ThunderCrabRepositoryImpl(
         cc: List<String>,
         subject: String,
         body: String,
+        readReceipt: Boolean,
     ): Result<Unit> = ioCatching {
         val draft = connectedDraft
             ?: throw FfiException.InvalidInput("Not connected — log in first.")
@@ -183,8 +184,8 @@ class ThunderCrabRepositoryImpl(
             // back to the source. Blank body → no HTML part (plain-only).
             body = body,
             htmlBody = body.ifBlank { null }?.let { renderMarkdown(it) },
-            // Read-receipt request is opt-in (compose toggle, wired separately).
-            readReceiptTo = null,
+            // Opt-in read receipt, addressed to the sending account.
+            readReceiptTo = if (readReceipt) draft.username else null,
         )
         // STARTTLS on 587 (the plausiden default). Password is passed straight
         // to the FFI and never retained here.
