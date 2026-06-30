@@ -62,6 +62,16 @@ class AppPrefs(context: Context) {
         get() = sp.getString(KEY_SIGNATURE, "") ?: ""
         set(v) = sp.edit().putString(KEY_SIGNATURE, v).apply()
 
+    /** Apply a full appearance set at once (e.g. pulled from personalization sync). */
+    fun applyAppearance(a: AppearancePrefs) {
+        sp.edit()
+            .putString(KEY_THEME, a.themeMode.name)
+            .putBoolean(KEY_AMOLED, a.amoled)
+            .putBoolean(KEY_DYNAMIC, a.dynamicColor)
+            .apply()
+        _appearance.value = a
+    }
+
     /** Whether the background IDLE push-notification service is enabled. */
     var backgroundIdle: Boolean
         get() = sp.getBoolean(KEY_BG_IDLE, false)

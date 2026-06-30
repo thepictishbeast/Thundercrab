@@ -137,6 +137,12 @@ class ThunderCrabRepositoryImpl(
     override suspend fun fetchBody(folder: String, uid: Int): Result<MessageBody> =
         guarded { c -> c.fetchBody(folder, uid.toUInt()).toDomain() }
 
+    override suspend fun getPersonalization(): Result<String?> =
+        guarded { c -> c.getPersonalization() }
+
+    override suspend fun setPersonalization(json: String): Result<Unit> =
+        guarded { c -> c.setPersonalization(json) }
+
     override suspend fun setFlag(folder: String, uid: Int, flag: String, set: Boolean): Result<Unit> =
         guarded { c ->
             c.setFlag(folder, uid.toUInt(), flag, set)

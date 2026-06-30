@@ -8,9 +8,11 @@ package com.plausiden.thundercrab.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.plausiden.thundercrab.data.AppPrefs
+import com.plausiden.thundercrab.data.PersonalizationCodec
 import com.plausiden.thundercrab.data.AppearancePrefs
 import com.plausiden.thundercrab.data.ThemeMode
 import com.plausiden.thundercrab.data.ThunderCrabRepository
@@ -19,6 +21,7 @@ import com.plausiden.thundercrab.data.model.DiagEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val repo: ThunderCrabRepository,
@@ -41,9 +44,28 @@ class SettingsViewModel(
         _signature.value = s
     }
 
-    fun setThemeMode(mode: ThemeMode) = prefs.setThemeMode(mode)
-    fun setAmoled(on: Boolean) = prefs.setAmoled(on)
-    fun setDynamicColor(on: Boolean) = prefs.setDynamicColor(on)
+    fun setThemeMode(mode: ThemeMode) { prefs.setThemeMode(mode); syncPersonalizationUp() }
+    fun setAmoled(on: Boolean) { prefs.setAmoled(on); syncPersonalizationUp() }
+    fun setDynamicColor(on: Boolean) { prefs.setDynamicColor(on); syncPersonalizationUp() }
+
+    /**
+     * Pull the synced personalization blob (if connected + the server has
+     * METADATA) and apply it locally. Best-effort: any failure leaves local
+     * prefs untouched (local-first). Call when the screen opens.
+     */
+    fun syncPersonalizationDown() {
+        viewModelScope.launch {
+            val json = repo.getPersonalization().getOrNull() ?: return@launch
+            PersonalizationCodec.decodeAppearance(json)?.let(prefs::applyAppearance)
+        }
+    }
+
+    /** Push the current appearance to the user's mailbox (best-effort, fire-and-forget). */
+    private fun syncPersonalizationUp() {
+        viewModelScope.launch {
+            repo.setPersonalization(PersonalizationCodec.encode(prefs.appearance.value))
+        }
+    }
 
     fun setTelemetry(on: Boolean) {
         repo.setTelemetryEnabled(on)

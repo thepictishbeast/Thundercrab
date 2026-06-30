@@ -167,4 +167,13 @@ interface ThunderCrabRepository {
      * owner's "render received mail" decision.)
      */
     suspend fun fetchBody(folder: String, uid: Int): Result<MessageBody>
+
+    /**
+     * Cross-device personalization sync via IMAP METADATA (the user's own
+     * mailbox — no third-party sync server). [getPersonalization] returns the
+     * stored JSON blob (null if none / server lacks METADATA); [setPersonalization]
+     * stores it. The schema is the app's; the seam is opaque.
+     */
+    suspend fun getPersonalization(): Result<String?>
+    suspend fun setPersonalization(json: String): Result<Unit>
 }

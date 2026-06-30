@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +76,9 @@ fun SettingsScreen(
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }
+
+    // Pull synced personalization (appearance, …) from the user's mailbox on open.
+    LaunchedEffect(Unit) { viewModel.syncPersonalizationDown() }
 
     Scaffold(
         topBar = {
