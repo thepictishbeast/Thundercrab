@@ -14,6 +14,7 @@ import com.plausiden.thundercrab.data.AppPrefs
 import com.plausiden.thundercrab.data.AppearancePrefs
 import com.plausiden.thundercrab.data.ThemeMode
 import com.plausiden.thundercrab.data.ThunderCrabRepository
+import com.plausiden.thundercrab.data.model.AccountDraft
 import com.plausiden.thundercrab.data.model.DiagEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +54,30 @@ class SettingsViewModel(
             _diagnostics.value = emptyList()
         }
     }
+
+    // --- Background IMAP IDLE push notifications ---
+
+    private val _backgroundIdle = MutableStateFlow(prefs.backgroundIdle)
+    val backgroundIdle: StateFlow<Boolean> = _backgroundIdle.asStateFlow()
+
+    /** Host/ports for `email` from the core defaults (no network, no secret). */
+    fun draftFor(email: String): AccountDraft = repo.accountDraftFor(email)
+
+    /** Persist the account + flip the flag on. Credential storage + starting the
+     *  service is the screen's job (it owns Context). */
+    fun enableBackground(draft: AccountDraft) {
+        prefs.saveAccount(draft)
+        prefs.backgroundIdle = true
+        _backgroundIdle.value = true
+    }
+
+    fun disableBackground() {
+        prefs.backgroundIdle = false
+        _backgroundIdle.value = false
+    }
+
+    /** Username of the persisted background account, if any (to clear its credential). */
+    fun backgroundAccountUsername(): String? = prefs.loadAccount()?.username
 
     fun refreshDiagnostics() {
         _diagnostics.value = repo.diagnostics()

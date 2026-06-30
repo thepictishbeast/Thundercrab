@@ -37,8 +37,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.plausiden.thundercrab.data.KeystoreCredentialStore
 import com.plausiden.thundercrab.data.ThemeMode
+import com.plausiden.thundercrab.service.IdleService
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +65,16 @@ fun SettingsScreen(
     val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val signature by viewModel.signature.collectAsStateWithLifecycle()
+    val backgroundIdle by viewModel.backgroundIdle.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
+    val credStore = remember { KeystoreCredentialStore(context.applicationContext) }
+    var showEnableDialog by remember { mutableStateOf(false) }
+    // Result ignored: the foreground service runs regardless; the grant only
+    // governs whether new-mail alerts can be posted (API 33+).
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
 
     Scaffold(
         topBar = {
@@ -153,6 +176,27 @@ fun SettingsScreen(
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
+            // ---- Notifications -------------------------------------------------
+            SectionHeader("Notifications")
+            ToggleRow(
+                title = "Background mail notifications",
+                subtitle = "Keep a secure connection open to alert you the moment mail " +
+                    "arrives. Your password is stored encrypted in the Android Keystore so " +
+                    "the watcher can reconnect in the background.",
+                checked = backgroundIdle,
+                onCheckedChange = { on ->
+                    if (on) {
+                        showEnableDialog = true
+                    } else {
+                        viewModel.backgroundAccountUsername()?.let { credStore.clear(it) }
+                        viewModel.disableBackground()
+                        IdleService.stop(context)
+                    }
+                },
+            )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+
             // ---- Outgoing mail -------------------------------------------------
             SectionHeader("Outgoing mail")
             OutlinedTextField(
@@ -172,6 +216,54 @@ fun SettingsScreen(
             NavRow(title = "Create a rule", subtitle = "Define where incoming mail goes", onClick = onCreateRule)
             NavRow(title = "Rule suggestions", subtitle = "Review + accept learned sorting rules", onClick = onOpenSuggestions)
         }
+    }
+
+    if (showEnableDialog) {
+        var email by remember { mutableStateOf(viewModel.backgroundAccountUsername() ?: "") }
+        var pw by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showEnableDialog = false },
+            title = { Text("Background notifications") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Enter your email and password. The password is encrypted in the " +
+                            "Android Keystore and used only to reconnect in the background.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Email") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = pw,
+                        onValueChange = { pw = it },
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = email.isNotBlank() && pw.isNotBlank(),
+                    onClick = {
+                        showEnableDialog = false
+                        credStore.store(email, pw)
+                        viewModel.enableBackground(viewModel.draftFor(email))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        IdleService.start(context)
+                    },
+                ) { Text("Enable") }
+            },
+            dismissButton = { TextButton(onClick = { showEnableDialog = false }) { Text("Cancel") } },
+        )
     }
 }
 
