@@ -17,6 +17,7 @@
 pub mod body;
 pub mod idle;
 pub mod managesieve;
+mod personalization;
 pub mod rust_imap;
 pub mod smtp;
 pub mod tls;

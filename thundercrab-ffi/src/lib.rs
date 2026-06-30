@@ -1030,6 +1030,39 @@ impl ThunderCrabClient {
         })
     }
 
+    /// Fetch the synced personalization blob (RFC 5464 IMAP METADATA on the
+    /// user's own mailbox — no third-party sync server). `null` if nothing is
+    /// stored or the server has no METADATA support.
+    ///
+    /// # Errors
+    /// `Protocol` on a malformed server response; `NotImplemented` if logged out.
+    pub async fn get_personalization(&self) -> Result<Option<String>, FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+        Ok(tokio::time::timeout(OP_TIMEOUT, backend.get_personalization())
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "get_personalization timed out".to_string(),
+            })??)
+    }
+
+    /// Store the personalization blob (`json`) as IMAP METADATA so it syncs to
+    /// every device on the next fetch. Opaque to the FFI — the client owns the
+    /// schema (rules, layout, appearance, …).
+    ///
+    /// # Errors
+    /// `Protocol` if `SETMETADATA` is rejected; `NotImplemented` if logged out.
+    pub async fn set_personalization(&self, json: String) -> Result<(), FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+        tokio::time::timeout(OP_TIMEOUT, backend.set_personalization(&json))
+            .await
+            .map_err(|_| FfiError::Transport {
+                detail: "set_personalization timed out".to_string(),
+            })??;
+        Ok(())
+    }
+
     /// Move `uid` from `from_folder` to `to_folder` (the IMAP side of a
     /// recorded flag-event move).
     ///

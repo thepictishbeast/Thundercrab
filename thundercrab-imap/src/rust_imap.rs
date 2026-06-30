@@ -91,8 +91,9 @@ pub(crate) async fn connect_session(
 pub struct RustImapBackend {
     /// The current authenticated session. Tokio `Mutex` because the
     /// `async_imap::Session` API takes `&mut self` on every method
-    /// and we expose the trait through `&self`.
-    session: Mutex<Session<TlsStream<TcpStream>>>,
+    /// and we expose the trait through `&self`. `pub(crate)` so sibling
+    /// modules (e.g. [`crate::personalization`]) can drive it.
+    pub(crate) session: Mutex<Session<TlsStream<TcpStream>>>,
 }
 
 impl RustImapBackend {
