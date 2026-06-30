@@ -63,14 +63,17 @@ class SettingsViewModel(
                 prefs.signature = sig
                 _signature.value = sig
             }
+            // Upsert synced sorting rules into the local store (merge, never lossy).
+            PersonalizationCodec.decodeRulesJson(json)?.let { repo.importRulesJson(it) }
         }
     }
 
     /** Push the current personalization to the user's mailbox (best-effort, fire-and-forget). */
     private fun syncPersonalizationUp() {
         viewModelScope.launch {
+            val rulesJson = repo.exportRulesJson().getOrDefault("[]")
             repo.setPersonalization(
-                PersonalizationCodec.encode(prefs.appearance.value, prefs.signature),
+                PersonalizationCodec.encode(prefs.appearance.value, prefs.signature, rulesJson),
             )
         }
     }

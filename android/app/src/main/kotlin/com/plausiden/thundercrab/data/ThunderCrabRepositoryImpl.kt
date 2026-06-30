@@ -269,6 +269,43 @@ class ThunderCrabRepositoryImpl(
         ffiDeleteRule(dbPath, id)
     }
 
+    override suspend fun exportRulesJson(): Result<String> = ioCatching {
+        val arr = org.json.JSONArray()
+        ffiLoadRules(dbPath).forEach { r ->
+            arr.put(
+                org.json.JSONObject()
+                    .put("id", r.id)
+                    .put("displayName", r.displayName)
+                    .put("whenJson", r.whenJson)
+                    .put("actionJson", r.actionJson)
+                    .put("score", r.score)
+                    .put("stopOnMatch", r.stopOnMatch)
+                    .put("origin", r.origin.name),
+            )
+        }
+        arr.toString()
+    }
+
+    override suspend fun importRulesJson(json: String): Result<Unit> = ioCatching {
+        val arr = org.json.JSONArray(json)
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            ffiSaveRule(
+                dbPath,
+                FfiCrabRule(
+                    id = o.getString("id"),
+                    displayName = o.getString("displayName"),
+                    whenJson = o.getString("whenJson"),
+                    actionJson = o.getString("actionJson"),
+                    score = o.getInt("score"),
+                    stopOnMatch = o.getBoolean("stopOnMatch"),
+                    origin = runCatching { FfiRuleOrigin.valueOf(o.getString("origin")) }
+                        .getOrDefault(FfiRuleOrigin.USER),
+                ),
+            )
+        }
+    }
+
     override suspend fun saveUserRule(
         displayName: String,
         whenJson: String,

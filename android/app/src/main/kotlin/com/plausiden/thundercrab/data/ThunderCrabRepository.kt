@@ -150,6 +150,20 @@ interface ThunderCrabRepository {
     suspend fun deleteSavedRule(id: String): Result<Boolean>
 
     /**
+     * Serialize every saved rule to a JSON array (for cross-device sync via the
+     * personalization blob). The `FfiCrabRule` fields are already JSON-friendly
+     * (the match/action ASTs are canonical JSON strings).
+     */
+    suspend fun exportRulesJson(): Result<String>
+
+    /**
+     * Upsert the rules in `json` (from a synced blob) into the local store. A
+     * merge, not a replace — locally-only rules are never dropped, so syncing
+     * can't lose a rule.
+     */
+    suspend fun importRulesJson(json: String): Result<Unit>
+
+    /**
      * Emit the personal Sieve script (RFC 5228) for the currently saved rules:
      * loads the rules then renders them. Pure preview — NEVER pushed to a server
      * (AVP-2 guardrail). Returns the script text for read-only display.
