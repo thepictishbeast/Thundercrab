@@ -35,7 +35,7 @@ use thundercrab_imap::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "crab", about = "ThunderCrab CLI — list/fetch/send/push-sieve")]
+#[command(name = "crab", about = "ThunderCrab CLI — list/fetch/read/send/push-sieve")]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -52,6 +52,13 @@ enum Cmd {
         /// Limit (number of most-recent messages to fetch).
         #[arg(long, default_value_t = 10)]
         limit: u32,
+    },
+    /// Read one message's body (plain text; notes if a sanitized HTML part exists).
+    Read {
+        /// Folder name (e.g., `INBOX`).
+        folder: String,
+        /// IMAP UID of the message (see `fetch`).
+        uid: u32,
     },
     /// Push a Sieve script and set it active. Reads the script body
     /// from `path`. Empty file = clear-the-rules.
@@ -120,6 +127,7 @@ async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Cmd::List => cmd_list(&cfg, &password).await,
         Cmd::Fetch { folder, limit } => cmd_fetch(&cfg, &password, &folder, limit).await,
+        Cmd::Read { folder, uid } => cmd_read(&cfg, &password, &folder, uid).await,
         Cmd::PushSieve { name, path } => cmd_push_sieve(&cfg, &password, &name, &path).await,
         Cmd::Send {
             to,
@@ -193,6 +201,28 @@ async fn cmd_fetch(
                 }
             }
         }
+    }
+    backend.logout().await;
+    Ok(())
+}
+
+async fn cmd_read(cfg: &AccountConfig, password: &str, folder: &str, uid: u32) -> Result<()> {
+    let backend = RustImapBackend::connect(cfg, password)
+        .await
+        .map_err(|e| anyhow!("connect: {e}"))?;
+    let body = backend
+        .fetch_body(folder, uid)
+        .await
+        .map_err(|e| anyhow!("fetch_body: {e}"))?;
+    match body.plain {
+        Some(text) if !text.trim().is_empty() => println!("{text}"),
+        _ => println!("(no plain-text body)"),
+    }
+    if let Some(html) = &body.html_sanitized {
+        println!(
+            "\n[+ {} bytes of sanitized HTML available — render it in the GUI/app]",
+            html.len()
+        );
     }
     backend.logout().await;
     Ok(())
