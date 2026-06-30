@@ -168,6 +168,54 @@ impl RustImapBackend {
 
         Ok(crate::body::parse_body(&raw))
     }
+
+    /// Search `folder` for messages matching `query` (an IMAP `SEARCH` criterion,
+    /// e.g. `TEXT "invoice"`, `FROM "alice"`, `SINCE 1-Jan-2026`). Returns header
+    /// summaries for the matches, newest UID first. Read-only (`EXAMINE`).
+    ///
+    /// # Errors
+    /// [`BackendError::Protocol`] if `EXAMINE`, `SEARCH`, or the follow-up
+    /// `FETCH` fails.
+    pub async fn search(
+        &self,
+        folder: &str,
+        query: &str,
+    ) -> Result<Vec<MessageHeaders>, BackendError> {
+        let mut session = self.session.lock().await;
+        session
+            .examine(folder)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("examine {folder}: {e}")))?;
+
+        let uids = session
+            .uid_search(query)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("uid_search: {e}")))?;
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let set = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut stream = session
+            .uid_fetch(set, "(UID ENVELOPE BODY.PEEK[HEADER])")
+            .await
+            .map_err(|e| BackendError::Protocol(format!("uid_fetch search: {e}")))?;
+
+        let mut out = Vec::new();
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(f) => out.push(headers_from_fetch(&f, folder)),
+                Err(e) => tracing::warn!(error = %e, "skipping unparseable search result"),
+            }
+        }
+        // FETCH may return in arbitrary order; present newest-first by UID.
+        out.sort_unstable_by_key(|h| std::cmp::Reverse(h.uid));
+        Ok(out)
+    }
 }
 
 /// A folder discovered via `LIST`, with the bits we need *before* we
@@ -345,39 +393,7 @@ impl Backend for RustImapBackend {
                     continue;
                 }
             };
-            let uid = f.uid.unwrap_or(0);
-            let envelope = f.envelope();
-            let from = envelope
-                .and_then(|e| e.from.as_ref())
-                .and_then(|addrs| addrs.first())
-                .map(|addr| {
-                    let mailbox = addr
-                        .mailbox
-                        .as_deref()
-                        .map(String::from_utf8_lossy)
-                        .unwrap_or_default();
-                    let host = addr
-                        .host
-                        .as_deref()
-                        .map(String::from_utf8_lossy)
-                        .unwrap_or_default();
-                    format!("{mailbox}@{host}")
-                })
-                .unwrap_or_default();
-            let subject = envelope
-                .and_then(|e| e.subject.as_deref())
-                .map(String::from_utf8_lossy)
-                .unwrap_or_default()
-                .into_owned();
-            let raw_headers = f.header().unwrap_or_default();
-            let other_headers = parse_headers(raw_headers);
-            out.push(MessageHeaders {
-                uid,
-                folder: folder.to_string(),
-                from,
-                subject,
-                other_headers,
-            });
+            out.push(headers_from_fetch(&f, folder));
         }
         if skipped > 0 {
             tracing::info!(
@@ -515,6 +531,44 @@ impl Backend for RustImapBackend {
             let verb = if subscribed { "subscribe" } else { "unsubscribe" };
             BackendError::Protocol(format!("{verb} {name}: {e}"))
         })
+    }
+}
+
+/// Build a [`MessageHeaders`] from one `FETCH` reply (UID + ENVELOPE +
+/// `BODY.PEEK[HEADER]`). Shared by `fetch_headers` and `search` so both surface
+/// identical header summaries.
+fn headers_from_fetch(f: &async_imap::types::Fetch, folder: &str) -> MessageHeaders {
+    let uid = f.uid.unwrap_or(0);
+    let envelope = f.envelope();
+    let from = envelope
+        .and_then(|e| e.from.as_ref())
+        .and_then(|addrs| addrs.first())
+        .map(|addr| {
+            let mailbox = addr
+                .mailbox
+                .as_deref()
+                .map(String::from_utf8_lossy)
+                .unwrap_or_default();
+            let host = addr
+                .host
+                .as_deref()
+                .map(String::from_utf8_lossy)
+                .unwrap_or_default();
+            format!("{mailbox}@{host}")
+        })
+        .unwrap_or_default();
+    let subject = envelope
+        .and_then(|e| e.subject.as_deref())
+        .map(String::from_utf8_lossy)
+        .unwrap_or_default()
+        .into_owned();
+    let other_headers = parse_headers(f.header().unwrap_or_default());
+    MessageHeaders {
+        uid,
+        folder: folder.to_string(),
+        from,
+        subject,
+        other_headers,
     }
 }
 

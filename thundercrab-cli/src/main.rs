@@ -35,7 +35,7 @@ use thundercrab_imap::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "crab", about = "ThunderCrab CLI — list/fetch/read/send/push-sieve")]
+#[command(name = "crab", about = "ThunderCrab CLI — list/fetch/read/search/send/push-sieve")]
 struct Cli {
     #[command(subcommand)]
     command: Cmd,
@@ -59,6 +59,13 @@ enum Cmd {
         folder: String,
         /// IMAP UID of the message (see `fetch`).
         uid: u32,
+    },
+    /// Search a folder for a term (IMAP `SEARCH TEXT` — headers + body).
+    Search {
+        /// Folder name (e.g., `INBOX`).
+        folder: String,
+        /// Text to search for.
+        term: String,
     },
     /// Push a Sieve script and set it active. Reads the script body
     /// from `path`. Empty file = clear-the-rules.
@@ -128,6 +135,7 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::List => cmd_list(&cfg, &password).await,
         Cmd::Fetch { folder, limit } => cmd_fetch(&cfg, &password, &folder, limit).await,
         Cmd::Read { folder, uid } => cmd_read(&cfg, &password, &folder, uid).await,
+        Cmd::Search { folder, term } => cmd_search(&cfg, &password, &folder, &term).await,
         Cmd::PushSieve { name, path } => cmd_push_sieve(&cfg, &password, &name, &path).await,
         Cmd::Send {
             to,
@@ -223,6 +231,30 @@ async fn cmd_read(cfg: &AccountConfig, password: &str, folder: &str, uid: u32) -
             "\n[+ {} bytes of sanitized HTML available — render it in the GUI/app]",
             html.len()
         );
+    }
+    backend.logout().await;
+    Ok(())
+}
+
+async fn cmd_search(cfg: &AccountConfig, password: &str, folder: &str, term: &str) -> Result<()> {
+    let backend = RustImapBackend::connect(cfg, password)
+        .await
+        .map_err(|e| anyhow!("connect: {e}"))?;
+    // Build a safe IMAP SEARCH quoted-string (escape `\` then `"`).
+    let escaped = term.replace('\\', "\\\\").replace('"', "\\\"");
+    let query = format!("TEXT \"{escaped}\"");
+    let hits = backend
+        .search(folder, &query)
+        .await
+        .map_err(|e| anyhow!("search: {e}"))?;
+    if hits.is_empty() {
+        println!("(no matches for {term:?} in {folder})");
+    } else {
+        println!("{} match(es) for {term:?} in {folder}:", hits.len());
+        for h in &hits {
+            println!("uid={}  from={}", h.uid, h.from);
+            println!("    subject: {}", h.subject);
+        }
     }
     backend.logout().await;
     Ok(())
