@@ -12,6 +12,7 @@ import com.plausiden.thundercrab.data.model.ConnectResult
 import com.plausiden.thundercrab.data.model.DiagEvent
 import com.plausiden.thundercrab.data.model.ErrorKind
 import com.plausiden.thundercrab.data.model.Folder
+import com.plausiden.thundercrab.data.model.Attachment
 import com.plausiden.thundercrab.data.model.MessageBody
 import com.plausiden.thundercrab.data.model.MessageHeader
 import com.plausiden.thundercrab.data.model.RuleSuggestion
@@ -434,9 +435,15 @@ class ThunderCrabRepositoryImpl(
         readReceiptRequested = readReceiptRequested,
     )
 
+    override suspend fun fetchAttachment(folder: String, uid: Int, index: Int): Result<ByteArray> =
+        guarded { c -> c.fetchAttachment(folder, uid.toUInt(), index.toUInt()) }
+
     private fun FfiMessageBody.toDomain() = MessageBody(
         plain = plain,
         htmlSanitized = htmlSanitized,
+        attachments = attachments.map {
+            Attachment(filename = it.filename, mimeType = it.mimeType, size = it.size.toLong())
+        },
     )
 
     private fun AccountDraft.toFfi(): FfiAccountConfig? = try {

@@ -20,4 +20,21 @@ package com.plausiden.thundercrab.data.model
 data class MessageBody(
     val plain: String?,
     val htmlSanitized: String?,
+    /** Attachments carried by the message, in document order. Bytes are fetched
+     *  on demand (see [com.plausiden.thundercrab.data.ThunderCrabRepository.fetchAttachment]). */
+    val attachments: List<Attachment> = emptyList(),
+)
+
+/**
+ * Metadata for one message attachment. The decoded bytes are NOT held here — they
+ * are fetched on demand by index so listing a message stays cheap.
+ *
+ * @param filename declared filename; may be blank for unnamed parts.
+ * @param mimeType MIME type as `type/subtype` (e.g. `image/png`).
+ * @param size     decoded size in bytes.
+ */
+data class Attachment(
+    val filename: String,
+    val mimeType: String,
+    val size: Long,
 )

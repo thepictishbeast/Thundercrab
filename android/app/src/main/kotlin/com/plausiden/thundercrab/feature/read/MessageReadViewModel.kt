@@ -59,6 +59,7 @@ class MessageReadViewModel(
                             bodyLoading = false,
                             bodyHtml = body.htmlSanitized,
                             bodyPlain = body.plain,
+                            attachments = body.attachments,
                         )
                     }
                 },
@@ -73,6 +74,14 @@ class MessageReadViewModel(
             )
         }
     }
+
+    /**
+     * Fetch one attachment's decoded bytes (by its index in `attachments`). The
+     * screen writes the bytes to a user-chosen file (Storage Access Framework),
+     * so the IO stays in the UI layer and the ViewModel holds no Android Context.
+     */
+    suspend fun loadAttachmentBytes(index: Int): Result<ByteArray> =
+        repo.fetchAttachment(folder, uid, index)
 
     /**
      * Optionally mark the open message \Seen. Best-effort: failures are swallowed

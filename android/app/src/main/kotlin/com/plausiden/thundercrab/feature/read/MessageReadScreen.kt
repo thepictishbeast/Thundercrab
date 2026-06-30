@@ -10,6 +10,9 @@
 // ============================================================================
 package com.plausiden.thundercrab.feature.read
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,17 +35,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.plausiden.thundercrab.data.model.Attachment
 import com.plausiden.thundercrab.ui.components.MessageBodyHtml
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,8 +134,104 @@ fun MessageReadScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             MessageBodySection(state)
+
+            if (state.attachments.isNotEmpty()) {
+                AttachmentsSection(
+                    attachments = state.attachments,
+                    loadBytes = viewModel::loadAttachmentBytes,
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun AttachmentsSection(
+    attachments: List<Attachment>,
+    loadBytes: suspend (index: Int) -> Result<ByteArray>,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // Which attachment the user is currently saving (set just before launching
+    // the file picker, consumed in its result callback).
+    var pendingIndex by remember { mutableStateOf<Int?>(null) }
+
+    // Storage Access Framework: the user picks the destination, so the app needs
+    // no storage permission and writes only where the user explicitly chose.
+    val createDocument = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        val index = pendingIndex
+        pendingIndex = null
+        if (uri == null || index == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            loadBytes(index)
+                .onSuccess { bytes ->
+                    val ok = runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                    }.isSuccess
+                    Toast.makeText(
+                        context,
+                        if (ok) "Attachment saved" else "Couldn't write the file",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                .onFailure { e ->
+                    Toast.makeText(
+                        context,
+                        "Couldn't fetch attachment: ${e.message}",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+        }
+    }
+
+    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+    Text(
+        text = "Attachments (${attachments.size})",
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        attachments.forEachIndexed { index, att ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = att.filename.ifBlank { "(unnamed)" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "${att.mimeType} · ${humanSize(att.size)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = {
+                    pendingIndex = index
+                    createDocument.launch(att.filename.ifBlank { "attachment_$index" })
+                }) {
+                    Text("Save")
+                }
+            }
+        }
+    }
+}
+
+/** Compact human-readable byte size (e.g. 12.3 KB). */
+private fun humanSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val units = listOf("KB", "MB", "GB")
+    var value = bytes.toDouble() / 1024
+    var unit = 0
+    while (value >= 1024 && unit < units.lastIndex) {
+        value /= 1024
+        unit++
+    }
+    return String.format(java.util.Locale.US, "%.1f %s", value, units[unit])
 }
 
 @Composable

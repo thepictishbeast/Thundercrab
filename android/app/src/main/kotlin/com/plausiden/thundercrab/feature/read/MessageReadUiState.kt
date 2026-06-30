@@ -6,6 +6,8 @@
 // ============================================================================
 package com.plausiden.thundercrab.feature.read
 
+import com.plausiden.thundercrab.data.model.Attachment
+
 data class MessageReadUiState(
     val from: String = "",
     val subject: String = "",
@@ -21,4 +23,6 @@ data class MessageReadUiState(
     val bodyPlain: String? = null,
     /** Non-null if the body fetch failed. */
     val bodyError: String? = null,
+    /** Attachments on the message (metadata only; bytes fetched on save). */
+    val attachments: List<Attachment> = emptyList(),
 )

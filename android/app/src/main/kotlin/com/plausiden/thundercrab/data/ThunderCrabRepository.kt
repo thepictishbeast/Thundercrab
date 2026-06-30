@@ -198,6 +198,13 @@ interface ThunderCrabRepository {
     suspend fun fetchBody(folder: String, uid: Int): Result<MessageBody>
 
     /**
+     * Fetch the decoded bytes of one attachment by its index in the message's
+     * [MessageBody.attachments] list. Fetched on demand (separate from the body)
+     * so listing a message stays cheap regardless of attachment size.
+     */
+    suspend fun fetchAttachment(folder: String, uid: Int, index: Int): Result<ByteArray>
+
+    /**
      * Cross-device personalization sync via IMAP METADATA (the user's own
      * mailbox — no third-party sync server). [getPersonalization] returns the
      * stored JSON blob (null if none / server lacks METADATA); [setPersonalization]
