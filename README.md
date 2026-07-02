@@ -35,12 +35,15 @@ One Rust core, thin native UIs over it via UniFFI (`thundercrab-ffi`). The
 lowercase `thundercrab-*` crate names are the Rust packages; **ThunderCrab** is
 the product brand.
 
-> Status: foundation. Workspace compiles; schemas + safety + federated ledger
-> primitives tested; IMAP/SMTP/ManageSieve backends are real; `thundercrab-ffi`
-> exposes the core to native UIs (account config, connect, list folders, fetch
-> headers, send, push Sieve, flag/move, rule + flag-event stores) and builds with
-> tests passing. Android/iOS/desktop UIs not yet built. Governed by AVP-2 —
-> nothing is `SHIP-DECISION:`.
+> Status: working client. Workspace compiles; schemas + safety + federated
+> ledger primitives tested; IMAP/SMTP/ManageSieve backends are real;
+> `thundercrab-ffi` exposes the core to native UIs (account config, connect,
+> folders, headers, bodies, search, attachments, send, push Sieve, flag/move,
+> IDLE, personalization sync, rule + flag-event stores). The Android app
+> (Jetpack Compose) reads/sends/searches mail with push notifications; the
+> Linux desktop app (Iced) connects, browses folders, and reads formatted
+> mail; the `crab` CLI covers the full wire layer. iOS not yet built.
+> Governed by AVP-2 — nothing is `SHIP-DECISION:`.
 
 ## What makes this different
 
@@ -85,6 +88,17 @@ Secure + private by construction, across the CLI, Android app, and Rust core:
   sync across devices via private IMAP `METADATA` on **your own mailbox**
   (RFC 5464): no sync server, no extra account, nothing for a third party to see
   or correlate.
+- **Search** — server-side full-text search (IMAP `SEARCH TEXT`, headers +
+  body), read-only so searching never marks anything seen. User terms are
+  wrapped in a single tested criterion builder that strips control characters
+  (blocks CRLF / IMAP injection) — UIs never construct raw IMAP syntax.
+- **Attachments** — listed with name/type/size; bytes fetched on demand. On
+  Android, saving uses the system file picker (Storage Access Framework), so
+  the app needs **no storage permission** and writes only where you chose.
+- **Desktop reading without a WebView** — the Linux app renders message bodies
+  through Iced's native Markdown widget (CommonMark → real widgets): formatted
+  mail with no HTML engine, no JS, no network. Links are shown, never
+  auto-opened.
 - **Post-quantum TLS** — X25519MLKEM768 hybrid key exchange on every
   IMAP / SMTP / ManageSieve connection.
 
