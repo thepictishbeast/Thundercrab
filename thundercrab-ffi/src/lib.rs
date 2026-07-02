@@ -142,6 +142,81 @@ fn ffi_category(e: &FfiError) -> DiagCategory {
     }
 }
 
+// =============================================================================
+// On-device error ring + client breadcrumbs (diagnostics report source)
+// =============================================================================
+//
+// The DiagEvent ring stays PII-free by design (it can be exported as
+// telemetry). This SECOND ring keeps the actual error strings and UI
+// breadcrumbs — it never leaves the device except inside an explicit,
+// user-initiated diagnostics report appended to the user's OWN mailbox.
+
+/// Max entries retained in the error/breadcrumb ring.
+const ERROR_RING_CAP: usize = 100;
+
+/// (unix ms, source op, detail line).
+static ERROR_RING: std::sync::LazyLock<std::sync::Mutex<std::collections::VecDeque<(u64, String, String)>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
+
+fn now_unix_ms() -> u64 {
+    u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0)
+}
+
+/// Record one line into the on-device error/breadcrumb ring.
+fn record_error_line(op: &str, detail: &str) {
+    let mut ring = ERROR_RING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if ring.len() >= ERROR_RING_CAP {
+        ring.pop_front();
+    }
+    ring.push_back((now_unix_ms(), op.to_string(), detail.to_string()));
+}
+
+/// Record a client-side breadcrumb (e.g. `"MessageList INBOX: showed 0 rows"`).
+/// Native UIs call this at interesting state transitions so a diagnostics
+/// report can reconstruct WHAT THE USER SAW, not just what the wire did.
+/// Stored on-device only (see the ring's privacy note).
+#[uniffi::export]
+pub fn log_client_event(line: String) {
+    tracing::info!(target: "thundercrab_ffi::client", "{line}");
+    record_error_line("ui", &line);
+}
+
+/// Initialize logging for the host platform. On Android, routes all `tracing`
+/// output (this crate + the Rust core) to logcat under the `ThunderCrab` tag —
+/// so `adb logcat -s ThunderCrab` (or a bug report) shows the full pipeline.
+/// `verbose` selects debug-level detail; changing it requires an app restart
+/// (the subscriber installs once per process).
+#[uniffi::export]
+pub fn init_logging(verbose: bool) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let filter = if verbose {
+            "info,thundercrab_ffi=debug,thundercrab_imap=debug,thundercrab_core=debug,thundercrab_suggestions=debug"
+        } else {
+            "info"
+        };
+        #[cfg(target_os = "android")]
+        {
+            use tracing_subscriber::layer::SubscriberExt;
+            use tracing_subscriber::util::SubscriberInitExt;
+            if let Ok(layer) = tracing_android::layer("ThunderCrab") {
+                let _ = tracing_subscriber::registry()
+                    .with(tracing_subscriber::EnvFilter::new(filter))
+                    .with(layer)
+                    .try_init();
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+                .with_target(false)
+                .compact()
+                .try_init();
+        }
+    });
+}
+
 /// Time an async operation and record exactly one [`DiagEvent`] for its outcome.
 /// `count_of` extracts the primary count from a success value (e.g. folders
 /// listed); failures record category-only, never the error string. This is the
@@ -161,7 +236,12 @@ where
     let ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
     match &res {
         Ok(v) => telemetry::record_event(ok, DiagCategory::None, op, count_of(v), 0, ms),
-        Err(e) => telemetry::record_event(fail, ffi_category(e), op, 0, 0, ms),
+        Err(e) => {
+            telemetry::record_event(fail, ffi_category(e), op, 0, 0, ms);
+            // Full error text goes to the ON-DEVICE ring only (see its privacy
+            // note) so a diagnostics report can explain WHY the op failed.
+            record_error_line(op, &e.to_string());
+        }
     }
     res
 }
@@ -1140,6 +1220,69 @@ impl ThunderCrabClient {
                     body.attachments.len()
                 ),
             })
+    }
+
+    /// Build a plain-text diagnostics report and append it to the
+    /// `ThunderCrab-Diagnostics` folder of the user's OWN mailbox (IMAP
+    /// `APPEND`; the folder is created if missing). Sovereign by construction:
+    /// the report never touches a third party — it lands where the user's mail
+    /// already lives, readable by whoever administers their own server.
+    ///
+    /// `context` is app-supplied free text (app version, device model, OS
+    /// level, and optionally what the user was doing). The report carries the
+    /// PII-free diagnostic events PLUS the on-device error/breadcrumb ring.
+    /// Explicitly user-initiated — never called automatically.
+    ///
+    /// # Errors
+    /// `Protocol` on IMAP failure; `NotImplemented` if already logged out.
+    pub async fn send_diagnostics_report(&self, context: String) -> Result<(), FfiError> {
+        let guard = self.inner.lock().await;
+        let backend = guard.as_ref().ok_or_else(client_gone)?;
+
+        let now = chrono::Utc::now();
+        let mut body = String::new();
+        body.push_str(&format!(
+            "ThunderCrab diagnostic report\ngenerated_at: {}\nffi_version: {}\n\n== context ==\n{}\n",
+            now.to_rfc3339(),
+            env!("CARGO_PKG_VERSION"),
+            context,
+        ));
+        body.push_str("\n== client events + errors (oldest first, on-device ring) ==\n");
+        {
+            let ring = ERROR_RING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if ring.is_empty() {
+                body.push_str("(none recorded)\n");
+            }
+            for (at, op, detail) in ring.iter() {
+                body.push_str(&format!("{at} [{op}] {detail}\n"));
+            }
+        }
+        body.push_str("\n== diagnostic events (PII-free ring) ==\n");
+        for e in telemetry::snapshot() {
+            let e = FfiDiagEvent::from(e);
+            body.push_str(&format!(
+                "{} {} cat={} op={} count={} extra={} ms={}\n",
+                e.at_unix_ms, e.kind, e.category, e.op, e.count, e.extra, e.duration_ms,
+            ));
+        }
+
+        // Minimal RFC 5322 wrapper; CRLF line endings for IMAP APPEND.
+        let message = format!(
+            "Subject: ThunderCrab diagnostic report {}\r\nDate: {}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+            now.format("%Y-%m-%dT%H:%M:%SZ"),
+            now.to_rfc2822(),
+            body.replace('\n', "\r\n"),
+        );
+
+        tokio::time::timeout(
+            OP_TIMEOUT,
+            backend.append_message("ThunderCrab-Diagnostics", message.as_bytes()),
+        )
+        .await
+        .map_err(|_| FfiError::Transport {
+            detail: "send_diagnostics_report timed out".to_string(),
+        })??;
+        Ok(())
     }
 
     /// Fetch the synced personalization blob (RFC 5464 IMAP METADATA on the

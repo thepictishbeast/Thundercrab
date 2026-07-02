@@ -216,6 +216,31 @@ impl RustImapBackend {
         out.sort_unstable_by_key(|h| std::cmp::Reverse(h.uid));
         Ok(out)
     }
+
+    /// Append a raw RFC 5322 message to `folder`, creating the folder first if
+    /// it doesn't exist (IMAP `APPEND` errors rather than auto-creating). Used
+    /// by the diagnostics-report channel: the report lands in a folder of the
+    /// user's OWN mailbox — no third-party endpoint.
+    ///
+    /// # Errors
+    /// [`BackendError::Protocol`] if the `APPEND` itself fails. A failed
+    /// `CREATE` is logged and ignored (the common cause is "already exists").
+    pub async fn append_message(
+        &self,
+        folder: &str,
+        message: &[u8],
+    ) -> Result<(), BackendError> {
+        let mut session = self.session.lock().await;
+        if let Err(e) = session.create(folder).await {
+            // Almost always "mailbox already exists" — the APPEND below is the
+            // real test, so log at debug and continue.
+            tracing::debug!(error = %e, folder, "CREATE before APPEND failed (likely exists)");
+        }
+        session
+            .append(folder, Some("(\\Seen)"), None, message)
+            .await
+            .map_err(|e| BackendError::Protocol(format!("append {folder}: {e}")))
+    }
 }
 
 /// A folder discovered via `LIST`, with the bits we need *before* we
