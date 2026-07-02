@@ -49,11 +49,19 @@ class MessageReadViewModel(
 
     /** Fetch the message body (sanitized by the core) for display. */
     private fun fetchBody() {
-        if (!_uiState.value.found) return
+        if (!_uiState.value.found) {
+            repo.logUiEvent("MessageRead $folder/$uid: header NOT in cache (blank screen)")
+            return
+        }
         _uiState.update { it.copy(bodyLoading = true, bodyError = null) }
         viewModelScope.launch {
             repo.fetchBody(folder, uid).fold(
                 onSuccess = { body ->
+                    // Sizes/counts only — never body content.
+                    repo.logUiEvent(
+                        "MessageRead $folder/$uid: html=${body.htmlSanitized?.length ?: 0}ch " +
+                            "plain=${body.plain?.length ?: 0}ch attachments=${body.attachments.size}",
+                    )
                     _uiState.update {
                         it.copy(
                             bodyLoading = false,
@@ -64,6 +72,7 @@ class MessageReadViewModel(
                     }
                 },
                 onFailure = { e ->
+                    repo.logUiEvent("MessageRead $folder/$uid: body FAILED: ${e.message}")
                     _uiState.update {
                         it.copy(
                             bodyLoading = false,

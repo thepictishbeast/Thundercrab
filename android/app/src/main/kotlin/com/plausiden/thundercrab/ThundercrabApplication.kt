@@ -26,6 +26,11 @@ class ThunderCrabApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(applicationContext)
+        // Route Rust-core `tracing` to logcat (tag "ThunderCrab") as early as
+        // possible so connect/fetch logs are captured from the first operation.
+        // The subscriber installs once per process; the verbose flag is read
+        // here, so toggling it in Settings applies on the next launch.
+        uniffi.thundercrab_ffi.initLogging(container.prefs.verboseLogging)
     }
 }
 

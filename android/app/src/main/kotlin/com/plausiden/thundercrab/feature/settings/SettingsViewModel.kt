@@ -88,6 +88,44 @@ class SettingsViewModel(
         }
     }
 
+    // --- Diagnostics: verbose logging + report-to-own-mailbox ---
+
+    private val _verboseLogging = MutableStateFlow(prefs.verboseLogging)
+    val verboseLogging: StateFlow<Boolean> = _verboseLogging.asStateFlow()
+
+    /** Persisted; the tracing subscriber installs once, so this applies on next launch. */
+    fun setVerboseLogging(on: Boolean) {
+        prefs.verboseLogging = on
+        _verboseLogging.value = on
+    }
+
+    private val _reportStatus = MutableStateFlow<String?>(null)
+    /** One-shot status line for the diagnostics-report action (null = idle). */
+    val reportStatus: StateFlow<String?> = _reportStatus.asStateFlow()
+
+    /**
+     * Append a diagnostics report to the user's OWN mailbox
+     * (`ThunderCrab-Diagnostics` folder). Requires a connected session.
+     */
+    fun sendDiagnosticsReport() {
+        _reportStatus.value = "Sending report…"
+        viewModelScope.launch {
+            repo.sendDiagnosticsReport("").fold(
+                onSuccess = {
+                    _reportStatus.value =
+                        "Report saved to the ThunderCrab-Diagnostics folder of your mailbox."
+                },
+                onFailure = { e ->
+                    _reportStatus.value = "Couldn't send the report: ${e.message}"
+                },
+            )
+        }
+    }
+
+    fun consumeReportStatus() {
+        _reportStatus.value = null
+    }
+
     // --- Background IMAP IDLE push notifications ---
 
     private val _backgroundIdle = MutableStateFlow(prefs.backgroundIdle)

@@ -246,6 +246,22 @@ class ThunderCrabRepositoryImpl(
         }
     }
 
+    override fun logUiEvent(line: String) {
+        // On-device breadcrumb ring (leaves only inside sendDiagnosticsReport).
+        uniffi.thundercrab_ffi.logClientEvent(line)
+    }
+
+    override suspend fun sendDiagnosticsReport(note: String): Result<Unit> =
+        guarded { c ->
+            val context = buildString {
+                appendLine("app: ThunderCrab for Android")
+                appendLine("device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                appendLine("android: ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})")
+                if (note.isNotBlank()) appendLine("user note: $note")
+            }
+            c.sendDiagnosticsReport(context)
+        }
+
     override suspend fun disconnect() = withContext(Dispatchers.IO) {
         clientLock.withLock {
             client?.let { c ->

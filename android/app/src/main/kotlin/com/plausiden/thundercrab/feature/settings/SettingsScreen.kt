@@ -64,6 +64,8 @@ fun SettingsScreen(
 ) {
     val appearance by viewModel.appearance.collectAsStateWithLifecycle()
     val telemetry by viewModel.telemetry.collectAsStateWithLifecycle()
+    val verboseLogging by viewModel.verboseLogging.collectAsStateWithLifecycle()
+    val reportStatus by viewModel.reportStatus.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val signature by viewModel.signature.collectAsStateWithLifecycle()
     val backgroundIdle by viewModel.backgroundIdle.collectAsStateWithLifecycle()
@@ -176,6 +178,31 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+
+            ToggleRow(
+                title = "Verbose logging",
+                subtitle = "Record debug-level logs from the mail engine in the system log " +
+                    "(helps track down bugs). Takes effect the next time the app starts.",
+                checked = verboseLogging,
+                onCheckedChange = viewModel::setVerboseLogging,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            ) {
+                Button(onClick = viewModel::sendDiagnosticsReport) {
+                    Text("Send diagnostic report")
+                }
+                Text(
+                    text = reportStatus
+                        ?: "Saves a report into the ThunderCrab-Diagnostics folder of your own " +
+                            "mailbox — nothing goes to any third party.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))

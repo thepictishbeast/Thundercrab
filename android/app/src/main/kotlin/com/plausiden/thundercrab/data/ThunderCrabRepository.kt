@@ -122,6 +122,21 @@ interface ThunderCrabRepository {
      */
     suspend fun uploadDiagnostics(): Result<Unit>
 
+    /**
+     * Record a UI breadcrumb ("MessageList INBOX: showed 0 rows") into the
+     * on-device ring, so a diagnostics report can reconstruct what the user
+     * SAW. Stays on-device; leaves only inside [sendDiagnosticsReport].
+     */
+    fun logUiEvent(line: String)
+
+    /**
+     * Build a diagnostics report (app/device context + diag events + the
+     * on-device error/breadcrumb ring) and append it to the user's OWN
+     * mailbox in the `ThunderCrab-Diagnostics` folder (IMAP APPEND — no
+     * third-party endpoint). User-initiated only.
+     */
+    suspend fun sendDiagnosticsReport(note: String): Result<Unit>
+
     /** Best-effort logout (drops IMAP session) + close()/destroy() of the Rust handle. */
     suspend fun disconnect()
 

@@ -38,9 +38,16 @@ class MessageListViewModel(
         viewModelScope.launch {
             repo.fetchHeaders(folder, MESSAGE_LIMIT).fold(
                 onSuccess = { headers ->
+                    // Breadcrumb: what the LIST SCREEN actually showed (diagnosable
+                    // later via the report — distinguishes "wire returned nothing"
+                    // from "wire returned N but the UI displayed none").
+                    repo.logUiEvent("MessageList $folder: showing ${headers.size} rows")
                     _uiState.update { it.copy(loading = false, messages = headers) }
                 },
-                onFailure = { e -> applyError(e) },
+                onFailure = { e ->
+                    repo.logUiEvent("MessageList $folder: load FAILED: ${e.message}")
+                    applyError(e)
+                },
             )
         }
     }
@@ -56,11 +63,18 @@ class MessageListViewModel(
         viewModelScope.launch {
             repo.search(folder, trimmed).fold(
                 onSuccess = { hits ->
+                    // Term length only — never the search term itself.
+                    repo.logUiEvent(
+                        "Search $folder: ${hits.size} hits (term ${trimmed.length} chars)",
+                    )
                     _uiState.update {
                         it.copy(loading = false, messages = hits, isSearchResult = true)
                     }
                 },
-                onFailure = { e -> applyError(e) },
+                onFailure = { e ->
+                    repo.logUiEvent("Search $folder: FAILED: ${e.message}")
+                    applyError(e)
+                },
             )
         }
     }

@@ -78,6 +78,15 @@ class AppPrefs(context: Context) {
         set(v) = sp.edit().putBoolean(KEY_BG_IDLE, v).apply()
 
     /**
+     * Verbose (debug-level) Rust-core logging to logcat. Read once at process
+     * start (the tracing subscriber installs once), so changes take effect on
+     * the next app launch. Off by default.
+     */
+    var verboseLogging: Boolean
+        get() = sp.getBoolean(KEY_VERBOSE_LOG, false)
+        set(v) = sp.edit().putBoolean(KEY_VERBOSE_LOG, v).apply()
+
+    /**
      * Persist the account config so the background IDLE service can reconnect
      * headless. NO secret here — host/user/ports only; the password lives in
      * [KeystoreCredentialStore].
@@ -122,6 +131,7 @@ class AppPrefs(context: Context) {
         const val KEY_TELEMETRY = "telemetry_enabled"
         const val KEY_SIGNATURE = "signature"
         const val KEY_BG_IDLE = "background_idle"
+        const val KEY_VERBOSE_LOG = "verbose_logging"
         const val KEY_ACC_IMAP_HOST = "acc_imap_host"
         const val KEY_ACC_IMAP_PORT = "acc_imap_port"
         const val KEY_ACC_SMTP_HOST = "acc_smtp_host"
