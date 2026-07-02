@@ -7,22 +7,36 @@
 // ============================================================================
 package com.plausiden.thundercrab.feature.compose
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -38,15 +52,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.plausiden.thundercrab.data.model.OutboundAttachment
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ComposeScreen(
     viewModel: ComposeViewModel,
@@ -55,7 +73,27 @@ fun ComposeScreen(
     val sent by viewModel.sent.collectAsStateWithLifecycle()
     val sending by viewModel.sending.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val attachments by viewModel.attachments.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // SAF file picker. OpenDocument grants read on the returned Uri; we read the
+    // bytes immediately (off the content provider) into an owned attachment so no
+    // long-lived Uri permission is needed. Oversized files are rejected here.
+    val pickFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val attachment = readAttachment(context, uri)
+        when {
+            attachment == null ->
+                scope.launch { snackbar.showSnackbar("Couldn't read that file.") }
+            attachment.bytes.size > MAX_ATTACHMENT_BYTES ->
+                scope.launch { snackbar.showSnackbar("That file is too large (max 25 MB).") }
+            else -> viewModel.addAttachment(attachment)
+        }
+    }
 
     var to by remember { mutableStateOf("") }
     var cc by remember { mutableStateOf("") }
@@ -117,6 +155,37 @@ fun ComposeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 8,
             )
+
+            // Attachments: pick a file, then show a removable chip per staged file.
+            TextButton(onClick = { pickFile.launch(arrayOf("*/*")) }) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Attach file")
+            }
+            if (attachments.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    attachments.forEachIndexed { index, att ->
+                        InputChip(
+                            selected = false,
+                            onClick = { },
+                            label = { Text(att.filename, maxLines = 1) },
+                            trailingIcon = {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Remove ${att.filename}",
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clickable { viewModel.removeAttachment(index) },
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -158,4 +227,26 @@ fun ComposeScreen(
             dismissButton = { TextButton(onClick = { askPassword = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** Cap on how large a picked file we'll read into memory (25 MB). Guards against
+ *  OOM on a huge selection; most mail servers reject larger messages anyway. */
+private const val MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+/**
+ * Resolve a picked `content://` [uri] into an owned [OutboundAttachment] by
+ * reading its bytes through the [context] ContentResolver. Returns null if the
+ * stream can't be opened. The display name comes from `OpenableColumns`, falling
+ * back to the Uri's last path segment; the MIME type from `getType`.
+ */
+private fun readAttachment(context: Context, uri: Uri): OutboundAttachment? {
+    val resolver = context.contentResolver
+    val name = resolver
+        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null }
+        ?: uri.lastPathSegment
+        ?: "attachment"
+    val mime = resolver.getType(uri) ?: "application/octet-stream"
+    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    return OutboundAttachment(filename = name, mimeType = mime, bytes = bytes)
 }

@@ -31,7 +31,7 @@ use thundercrab_imap::{
     AccountConfig, Backend,
     managesieve,
     rust_imap::RustImapBackend,
-    smtp::{OutboundMessage, SmtpEncryption, send_message},
+    smtp::{OutboundAttachment, OutboundMessage, SmtpEncryption, send_message},
 };
 
 #[derive(Parser, Debug)]
@@ -111,6 +111,10 @@ enum Cmd {
         /// addressed to the sending account. Opt-in; recipients may ignore it.
         #[arg(long)]
         read_receipt: bool,
+        /// Attach a file. Repeat for multiple. The MIME type is guessed from
+        /// the extension (falls back to application/octet-stream).
+        #[arg(long = "attach")]
+        attach: Vec<std::path::PathBuf>,
         /// Submission flavor — `starttls` (port 587) or `implicit` (port 465).
         #[arg(long, default_value = "starttls")]
         encryption: String,
@@ -159,6 +163,7 @@ async fn run(cli: Cli) -> Result<()> {
             body,
             html,
             read_receipt,
+            attach,
             encryption,
         } => {
             cmd_send(
@@ -170,6 +175,7 @@ async fn run(cli: Cli) -> Result<()> {
                 &body,
                 html.as_deref(),
                 read_receipt,
+                &attach,
                 &encryption,
             )
             .await
@@ -331,6 +337,36 @@ async fn cmd_push_sieve(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Best-effort MIME type from a file extension. The SMTP layer falls back to
+/// `application/octet-stream` for anything it can't parse, so an unknown
+/// extension here is harmless — this just gives common types a friendlier label.
+fn mime_for_path(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("pdf") => "application/pdf",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("txt") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("html" | "htm") => "text/html",
+        Some("csv") => "text/csv",
+        Some("json") => "application/json",
+        Some("zip") => "application/zip",
+        Some("doc") => "application/msword",
+        Some("docx") => {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }
+        _ => "application/octet-stream",
+    }
+}
+
 async fn cmd_send(
     cfg: &AccountConfig,
     password: &str,
@@ -340,6 +376,7 @@ async fn cmd_send(
     body: &str,
     html: Option<&str>,
     read_receipt: bool,
+    attach: &[std::path::PathBuf],
     encryption: &str,
 ) -> Result<()> {
     if to.is_empty() {
@@ -359,6 +396,28 @@ async fn cmd_send(
     let to_refs: Vec<&str> = to.iter().map(String::as_str).collect();
     let cc_refs: Vec<&str> = cc.iter().map(String::as_str).collect();
     let from = cfg.username.as_str();
+    // Read each --attach file into owned (filename, mime, bytes) tuples. These
+    // must outlive `atts` below, which only borrows into them.
+    let attach_data: Vec<(String, &'static str, Vec<u8>)> = attach
+        .iter()
+        .map(|path| {
+            let bytes = std::fs::read(path)
+                .with_context(|| format!("reading attachment {}", path.display()))?;
+            let filename = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "attachment".to_string());
+            Ok((filename, mime_for_path(path), bytes))
+        })
+        .collect::<Result<_>>()?;
+    let atts: Vec<OutboundAttachment> = attach_data
+        .iter()
+        .map(|(filename, mime, bytes)| OutboundAttachment {
+            filename,
+            mime_type: mime,
+            bytes,
+        })
+        .collect();
     let msg = OutboundMessage {
         from,
         to: &to_refs,
@@ -368,6 +427,7 @@ async fn cmd_send(
         html_body: html_owned.as_deref(),
         // Request the receipt to the sending account when --read-receipt is set.
         read_receipt_to: read_receipt.then_some(from),
+        attachments: &atts,
     };
     let enc = match encryption {
         "starttls" => SmtpEncryption::StartTls,

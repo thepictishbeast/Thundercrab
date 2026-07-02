@@ -30,7 +30,7 @@
 //!   time anyway).
 
 use lettre::message::header::{Header, HeaderName, HeaderValue};
-use lettre::message::{Mailbox, MultiPart};
+use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart, header::ContentType};
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncTransport, Message, Tokio1Executor};
@@ -101,6 +101,22 @@ pub struct OutboundMessage<'a> {
     /// can return a Message Disposition Notification to `addr`. Opt-in per
     /// message — `None` requests nothing. Typically the sender's own address.
     pub read_receipt_to: Option<&'a str>,
+    /// Files to attach. When non-empty, the whole message is wrapped in
+    /// `multipart/mixed` (body part first, then each attachment). Empty = no
+    /// attachments and the message shape is unchanged (plain or alternative).
+    pub attachments: &'a [OutboundAttachment<'a>],
+}
+
+/// One outgoing attachment: the decoded bytes plus how to label them.
+#[derive(Debug, Clone, Copy)]
+pub struct OutboundAttachment<'a> {
+    /// Filename shown to the recipient (Content-Disposition `filename`).
+    pub filename: &'a str,
+    /// MIME type as `type/subtype` (e.g. `image/png`). Falls back to
+    /// `application/octet-stream` when it can't be parsed.
+    pub mime_type: &'a str,
+    /// The raw file bytes.
+    pub bytes: &'a [u8],
 }
 
 /// Connect, authenticate, send one message, close the transport.
@@ -174,15 +190,43 @@ fn build_message(message: &OutboundMessage<'_>) -> Result<Message, BackendError>
         builder = builder.header(DispositionNotificationTo(addr.to_string()));
     }
 
-    let composed = match message.html_body {
-        // text/plain first, text/html second: per MIME, clients render the
-        // LAST part they understand, so HTML-capable clients show the HTML
-        // while plain-text clients fall back to the plain part.
-        Some(html) => builder.multipart(MultiPart::alternative_plain_html(
-            message.body.to_string(),
-            html.to_string(),
-        )),
-        None => builder.body(message.body.to_string()),
+    let composed = if message.attachments.is_empty() {
+        // No attachments — original shapes: alternative when HTML is present,
+        // a bare text/plain body otherwise (per MIME, clients render the LAST
+        // part they understand, so HTML clients show HTML and plain clients
+        // fall back to the plain part).
+        match message.html_body {
+            Some(html) => builder.multipart(MultiPart::alternative_plain_html(
+                message.body.to_string(),
+                html.to_string(),
+            )),
+            None => builder.body(message.body.to_string()),
+        }
+    } else {
+        // multipart/mixed: the body part first, then each attachment. The body
+        // part is the alternative (plain+html) when HTML is present, otherwise
+        // a single text/plain part.
+        let body_part = match message.html_body {
+            Some(html) => MultiPart::alternative_plain_html(
+                message.body.to_string(),
+                html.to_string(),
+            ),
+            None => MultiPart::mixed().singlepart(
+                SinglePart::builder()
+                    .header(ContentType::TEXT_PLAIN)
+                    .body(message.body.to_string()),
+            ),
+        };
+        let mut mixed = MultiPart::mixed().multipart(body_part);
+        for att in message.attachments {
+            let content_type = ContentType::parse(att.mime_type).unwrap_or_else(|_| {
+                ContentType::parse("application/octet-stream").expect("valid MIME literal")
+            });
+            mixed = mixed.singlepart(
+                Attachment::new(att.filename.to_string()).body(att.bytes.to_vec(), content_type),
+            );
+        }
+        builder.multipart(mixed)
     };
     composed.map_err(|e| BackendError::Protocol(format!("compose: {e}")))
 }
@@ -225,6 +269,7 @@ mod tests {
             body,
             html_body: html,
             read_receipt_to: None,
+            attachments: &[],
         }
     }
 
@@ -267,8 +312,25 @@ mod tests {
             body: "x",
             html_body: None,
             read_receipt_to: None,
+            attachments: &[],
         };
         assert!(build_message(&bad).is_err());
+    }
+
+    #[test]
+    fn attachment_produces_multipart_mixed_with_filename() {
+        let mut m = msg("see attached", None);
+        let att = [OutboundAttachment {
+            filename: "report.pdf",
+            mime_type: "application/pdf",
+            bytes: b"%PDF-1.4 fake",
+        }];
+        m.attachments = &att;
+        let wire = String::from_utf8(build_message(&m).expect("builds").formatted()).expect("utf8");
+        assert!(wire.contains("multipart/mixed"), "mixed wrapper present:\n{wire}");
+        assert!(wire.contains("application/pdf"), "attachment content-type present");
+        assert!(wire.contains("report.pdf"), "attachment filename present");
+        assert!(wire.contains("see attached"), "body still present");
     }
 
     #[test]

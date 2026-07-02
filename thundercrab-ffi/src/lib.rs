@@ -575,6 +575,23 @@ pub struct FfiOutboundMessage {
     /// When set, request a read receipt (RFC 8098) to this address — usually
     /// the sender's own. Opt-in per message; null requests nothing.
     pub read_receipt_to: Option<String>,
+    /// Files to attach. When non-empty, the whole message is wrapped in
+    /// `multipart/mixed` (body first, then each attachment). Empty = no change.
+    pub attachments: Vec<FfiOutboundAttachment>,
+}
+
+/// One outgoing attachment crossing the FFI seam: owned bytes plus their label.
+/// `bytes` surfaces to Kotlin as `ByteArray`. Mirrors
+/// [`thundercrab_imap::smtp::OutboundAttachment`], which borrows instead.
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct FfiOutboundAttachment {
+    /// Filename shown to the recipient (Content-Disposition `filename`).
+    pub filename: String,
+    /// MIME type as `type/subtype`; falls back to `application/octet-stream`
+    /// in the SMTP layer when it can't be parsed.
+    pub mime_type: String,
+    /// The raw file bytes.
+    pub bytes: Vec<u8>,
 }
 
 // =============================================================================
@@ -908,6 +925,16 @@ pub async fn send_message(
     // Rebuild the borrowing OutboundMessage<'a> view from the owned strings.
     let to: Vec<&str> = message.to.iter().map(String::as_str).collect();
     let cc: Vec<&str> = message.cc.iter().map(String::as_str).collect();
+    // Rebuild the borrowing attachment views from the owned FFI records.
+    let attachments: Vec<smtp::OutboundAttachment> = message
+        .attachments
+        .iter()
+        .map(|a| smtp::OutboundAttachment {
+            filename: a.filename.as_str(),
+            mime_type: a.mime_type.as_str(),
+            bytes: a.bytes.as_slice(),
+        })
+        .collect();
     let outbound = OutboundMessage {
         from: message.from.as_str(),
         to: &to,
@@ -916,6 +943,7 @@ pub async fn send_message(
         body: message.body.as_str(),
         html_body: message.html_body.as_deref(),
         read_receipt_to: message.read_receipt_to.as_deref(),
+        attachments: &attachments,
     };
     timed(
         "send_message",

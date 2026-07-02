@@ -15,6 +15,7 @@ import com.plausiden.thundercrab.data.model.Folder
 import com.plausiden.thundercrab.data.model.Attachment
 import com.plausiden.thundercrab.data.model.MessageBody
 import com.plausiden.thundercrab.data.model.MessageHeader
+import com.plausiden.thundercrab.data.model.OutboundAttachment
 import com.plausiden.thundercrab.data.model.RuleSuggestion
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ import uniffi.thundercrab_ffi.FfiFlagSource
 import uniffi.thundercrab_ffi.FfiHeaders
 import uniffi.thundercrab_ffi.FfiMessageBody
 import uniffi.thundercrab_ffi.FfiFolder
+import uniffi.thundercrab_ffi.FfiOutboundAttachment
 import uniffi.thundercrab_ffi.FfiOutboundMessage
 import uniffi.thundercrab_ffi.renderMarkdown
 import uniffi.thundercrab_ffi.FfiSmtpEncryption
@@ -188,6 +190,7 @@ class ThunderCrabRepositoryImpl(
         subject: String,
         body: String,
         readReceipt: Boolean,
+        attachments: List<OutboundAttachment>,
     ): Result<Unit> = ioCatching {
         val draft = connectedDraft
             ?: throw FfiException.InvalidInput("Not connected — log in first.")
@@ -206,6 +209,14 @@ class ThunderCrabRepositoryImpl(
             htmlBody = body.ifBlank { null }?.let { renderMarkdown(it) },
             // Opt-in read receipt, addressed to the sending account.
             readReceiptTo = if (readReceipt) draft.username else null,
+            // Cross the firewall: domain attachments → owned Ffi records.
+            attachments = attachments.map {
+                FfiOutboundAttachment(
+                    filename = it.filename,
+                    mimeType = it.mimeType,
+                    bytes = it.bytes,
+                )
+            },
         )
         // STARTTLS on 587 (the plausiden default). Password is passed straight
         // to the FFI and never retained here.

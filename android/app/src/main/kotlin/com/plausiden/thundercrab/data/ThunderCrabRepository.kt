@@ -13,6 +13,7 @@ import com.plausiden.thundercrab.data.model.DiagEvent
 import com.plausiden.thundercrab.data.model.Folder
 import com.plausiden.thundercrab.data.model.MessageBody
 import com.plausiden.thundercrab.data.model.MessageHeader
+import com.plausiden.thundercrab.data.model.OutboundAttachment
 import com.plausiden.thundercrab.data.model.RuleSuggestion
 
 /**
@@ -91,6 +92,8 @@ interface ThunderCrabRepository {
         body: String,
         /** Request a read receipt (RFC 8098) to the sending account. Opt-in. */
         readReceipt: Boolean = false,
+        /** Files to attach; empty sends an unattached message unchanged. */
+        attachments: List<OutboundAttachment> = emptyList(),
     ): Result<Unit>
 
     /**

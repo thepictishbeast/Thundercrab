@@ -13,6 +13,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.plausiden.thundercrab.data.AppPrefs
 import com.plausiden.thundercrab.data.ThunderCrabRepository
+import com.plausiden.thundercrab.data.model.OutboundAttachment
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +36,20 @@ class ComposeViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    /** Files staged for this message. The screen resolves picked Uris into
+     *  owned [OutboundAttachment]s (bytes read off the content provider) and
+     *  adds them here; the VM stays free of Android platform types. */
+    private val _attachments = MutableStateFlow<List<OutboundAttachment>>(emptyList())
+    val attachments: StateFlow<List<OutboundAttachment>> = _attachments.asStateFlow()
+
+    fun addAttachment(attachment: OutboundAttachment) {
+        _attachments.value = _attachments.value + attachment
+    }
+
+    fun removeAttachment(index: Int) {
+        _attachments.value = _attachments.value.filterIndexed { i, _ -> i != index }
+    }
+
     fun send(
         password: String,
         to: String,
@@ -52,6 +67,7 @@ class ComposeViewModel(
                 subject = subject,
                 body = body,
                 readReceipt = readReceipt,
+                attachments = _attachments.value,
             ).fold(
                 onSuccess = { _sent.value = true },
                 onFailure = { e ->
