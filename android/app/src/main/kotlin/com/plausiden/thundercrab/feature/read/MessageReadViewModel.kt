@@ -112,7 +112,9 @@ class MessageReadViewModel(
      */
     fun reply() {
         val s = _uiState.value
-        if (!s.found) return
+        // Need the body to quote it; ignore a second request while a forward is
+        // still fetching attachment bytes (avoids two compose navigations).
+        if (!s.found || s.bodyLoading || _preparingForward.value) return
         val messageId = ReplyForward.headerValue(s.headers, "message-id")
         _draftReady.value = ComposeDraft(
             to = ReplyForward.headerValue(s.headers, "reply-to") ?: s.from,
@@ -138,13 +140,28 @@ class MessageReadViewModel(
      */
     fun forward() {
         val s = _uiState.value
-        if (!s.found) return
+        // Need the loaded body + attachment list; ignore a re-tap while already
+        // preparing a forward.
+        if (!s.found || s.bodyLoading || _preparingForward.value) return
         _preparingForward.value = true
         viewModelScope.launch {
+            var dropped = 0
             val carried = s.attachments.mapIndexedNotNull { index, a ->
-                loadAttachmentBytes(index).getOrNull()?.let { bytes ->
+                val bytes = loadAttachmentBytes(index).getOrNull()
+                if (bytes == null) {
+                    dropped++
+                    null
+                } else {
                     OutboundAttachment(filename = a.filename, mimeType = a.mimeType, bytes = bytes)
                 }
+            }
+            if (dropped > 0) {
+                // Counts only, never content — the user sees the surviving chips
+                // in Compose and this records the shortfall for diagnostics.
+                repo.logUiEvent(
+                    "Forward $folder/$uid: $dropped of ${s.attachments.size} attachment(s) " +
+                        "could not be fetched and were omitted",
+                )
             }
             _preparingForward.value = false
             _draftReady.value = ComposeDraft(

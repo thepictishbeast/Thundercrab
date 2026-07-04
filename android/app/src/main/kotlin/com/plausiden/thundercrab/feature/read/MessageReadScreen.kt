@@ -95,14 +95,20 @@ fun MessageReadScreen(
                 },
                 actions = {
                     if (state.found) {
-                        TextButton(onClick = { viewModel.reply() }) { Text("Reply") }
+                        // Reply/Forward need the loaded body to quote/carry it, so
+                        // they stay disabled until the fetch completes.
+                        val ready = !state.bodyLoading && !preparingForward
+                        TextButton(onClick = { viewModel.reply() }, enabled = ready) { Text("Reply") }
                         if (preparingForward) {
                             CircularProgressIndicator(
                                 modifier = Modifier.padding(horizontal = 12.dp).height(20.dp),
                                 strokeWidth = 2.dp,
                             )
                         } else {
-                            TextButton(onClick = { viewModel.forward() }) { Text("Forward") }
+                            TextButton(
+                                onClick = { viewModel.forward() },
+                                enabled = !state.bodyLoading,
+                            ) { Text("Forward") }
                         }
                     }
                 },

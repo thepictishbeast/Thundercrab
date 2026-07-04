@@ -53,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,13 +97,20 @@ fun ComposeScreen(
     }
 
     // Seed from the ViewModel's initial values (prefilled for reply/forward,
-    // blank + signature for a fresh compose).
-    var to by remember { mutableStateOf(viewModel.initialTo) }
-    var cc by remember { mutableStateOf(viewModel.initialCc) }
-    var subject by remember { mutableStateOf(viewModel.initialSubject) }
-    var body by remember { mutableStateOf(viewModel.initialBody) }
+    // blank + signature for a fresh compose). rememberSaveable so edits survive
+    // rotation AND process death — the initializer still runs only on first
+    // composition. The reply threading IDs ride along so a restored reply still
+    // threads even after the one-shot draft holder is gone.
+    var to by rememberSaveable { mutableStateOf(viewModel.initialTo) }
+    var cc by rememberSaveable { mutableStateOf(viewModel.initialCc) }
+    var subject by rememberSaveable { mutableStateOf(viewModel.initialSubject) }
+    var body by rememberSaveable { mutableStateOf(viewModel.initialBody) }
+    val inReplyTo by rememberSaveable { mutableStateOf(viewModel.initialInReplyTo) }
+    val references by rememberSaveable { mutableStateOf(viewModel.initialReferences) }
+    var requestReceipt by rememberSaveable { mutableStateOf(false) }
+    // Transient: the "enter password" dialog flag never persists, and the
+    // password field itself (below) is deliberately non-saveable (§5.2).
     var askPassword by remember { mutableStateOf(false) }
-    var requestReceipt by remember { mutableStateOf(false) }
 
     LaunchedEffect(sent) { if (sent) onDone() }
     LaunchedEffect(error) { error?.let { snackbar.showSnackbar(it); viewModel.consumeError() } }
@@ -220,7 +228,10 @@ fun ComposeScreen(
             },
             confirmButton = {
                 TextButton(
-                    onClick = { askPassword = false; viewModel.send(pw, to, cc, subject, body, requestReceipt) },
+                    onClick = {
+                        askPassword = false
+                        viewModel.send(pw, to, cc, subject, body, requestReceipt, inReplyTo, references)
+                    },
                     enabled = pw.isNotBlank(),
                 ) { Text("Send") }
             },

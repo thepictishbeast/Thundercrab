@@ -152,7 +152,9 @@ fun ThundercrabNavHost() {
                 onMessageClick = { uid ->
                     navController.navigate(Destinations.read(folder, uid))
                 },
-                onCompose = { navController.navigate(Destinations.COMPOSE) },
+                onCompose = {
+                    navController.navigate(Destinations.COMPOSE) { launchSingleTop = true }
+                },
             )
         }
 
@@ -175,7 +177,7 @@ fun ThundercrabNavHost() {
                 onOpenCompose = { draft ->
                     // Hand the prefilled draft to Compose via the one-shot holder.
                     container.pendingDraft = draft
-                    navController.navigate(Destinations.COMPOSE)
+                    navController.navigate(Destinations.COMPOSE) { launchSingleTop = true }
                 },
             )
         }

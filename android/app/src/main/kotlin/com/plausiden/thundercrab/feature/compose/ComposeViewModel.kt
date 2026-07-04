@@ -38,10 +38,12 @@ class ComposeViewModel(
     val initialBody: String = draft?.body
         ?: if (signature.isNotBlank()) "\n\n$signature" else ""
 
-    // RFC 5322 threading carried from a reply draft (null otherwise); applied at
-    // send time so the UI never has to thread it through.
-    private val inReplyTo: String? = draft?.inReplyTo
-    private val references: String? = draft?.references
+    // RFC 5322 threading carried from a reply draft (null otherwise). Exposed as
+    // initial values so the screen can hold them in rememberSaveable — surviving
+    // rotation AND process death (when the one-shot draft holder is already gone)
+    // — and pass them back at send time.
+    val initialInReplyTo: String? = draft?.inReplyTo
+    val initialReferences: String? = draft?.references
 
     private val _sent = MutableStateFlow(false)
     val sent: StateFlow<Boolean> = _sent.asStateFlow()
@@ -73,6 +75,8 @@ class ComposeViewModel(
         subject: String,
         body: String,
         readReceipt: Boolean = false,
+        inReplyTo: String? = null,
+        references: String? = null,
     ) {
         _sending.value = true
         viewModelScope.launch {
