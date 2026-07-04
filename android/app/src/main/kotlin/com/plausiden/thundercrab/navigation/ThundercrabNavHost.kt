@@ -93,11 +93,15 @@ fun ThundercrabNavHost() {
 
         // 2e. Compose ----------------------------------------------------------
         composable(Destinations.COMPOSE) {
+            // Consume the one-shot reply/forward draft (null for a fresh compose).
+            // `remember` captures it once so recomposition doesn't re-read null.
+            val draft = remember { container.pendingDraft.also { container.pendingDraft = null } }
             val vm: com.plausiden.thundercrab.feature.compose.ComposeViewModel =
                 viewModel(
                     factory = com.plausiden.thundercrab.feature.compose.ComposeViewModel.factory(
                         repository,
                         container.prefs,
+                        draft,
                     ),
                 )
             com.plausiden.thundercrab.feature.compose.ComposeScreen(
@@ -168,6 +172,11 @@ fun ThundercrabNavHost() {
             MessageReadScreen(
                 viewModel = vm,
                 onBack = { navController.popBackStack() },
+                onOpenCompose = { draft ->
+                    // Hand the prefilled draft to Compose via the one-shot holder.
+                    container.pendingDraft = draft
+                    navController.navigate(Destinations.COMPOSE)
+                },
             )
         }
     }

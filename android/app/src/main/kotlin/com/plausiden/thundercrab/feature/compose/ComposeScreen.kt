@@ -95,12 +95,12 @@ fun ComposeScreen(
         }
     }
 
-    var to by remember { mutableStateOf("") }
-    var cc by remember { mutableStateOf("") }
-    var subject by remember { mutableStateOf("") }
-    var body by remember {
-        mutableStateOf(if (viewModel.signature.isNotBlank()) "\n\n${viewModel.signature}" else "")
-    }
+    // Seed from the ViewModel's initial values (prefilled for reply/forward,
+    // blank + signature for a fresh compose).
+    var to by remember { mutableStateOf(viewModel.initialTo) }
+    var cc by remember { mutableStateOf(viewModel.initialCc) }
+    var subject by remember { mutableStateOf(viewModel.initialSubject) }
+    var body by remember { mutableStateOf(viewModel.initialBody) }
     var askPassword by remember { mutableStateOf(false) }
     var requestReceipt by remember { mutableStateOf(false) }
 

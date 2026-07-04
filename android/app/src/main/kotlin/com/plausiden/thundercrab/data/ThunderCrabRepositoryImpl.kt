@@ -191,6 +191,8 @@ class ThunderCrabRepositoryImpl(
         body: String,
         readReceipt: Boolean,
         attachments: List<OutboundAttachment>,
+        inReplyTo: String?,
+        references: String?,
     ): Result<Unit> = ioCatching {
         val draft = connectedDraft
             ?: throw FfiException.InvalidInput("Not connected — log in first.")
@@ -209,6 +211,9 @@ class ThunderCrabRepositoryImpl(
             htmlBody = body.ifBlank { null }?.let { renderMarkdown(it) },
             // Opt-in read receipt, addressed to the sending account.
             readReceiptTo = if (readReceipt) draft.username else null,
+            // RFC 5322 threading (reply). Null on fresh compose / forward.
+            inReplyTo = inReplyTo,
+            references = references,
             // Cross the firewall: domain attachments → owned Ffi records.
             attachments = attachments.map {
                 FfiOutboundAttachment(

@@ -12,6 +12,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.plausiden.thundercrab.data.ThunderCrabRepository
+import com.plausiden.thundercrab.data.model.ComposeDraft
+import com.plausiden.thundercrab.data.model.OutboundAttachment
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +28,15 @@ class MessageReadViewModel(
 
     private val _uiState = MutableStateFlow(loadFromCache())
     val uiState: StateFlow<MessageReadUiState> = _uiState.asStateFlow()
+
+    /** Emitted when Reply/Forward has built a draft; the screen hands it to the
+     *  compose flow and calls [consumeDraft]. */
+    private val _draftReady = MutableStateFlow<ComposeDraft?>(null)
+    val draftReady: StateFlow<ComposeDraft?> = _draftReady.asStateFlow()
+
+    /** True while a forward is fetching original attachment bytes. */
+    private val _preparingForward = MutableStateFlow(false)
+    val preparingForward: StateFlow<Boolean> = _preparingForward.asStateFlow()
 
     init {
         fetchBody()
@@ -91,6 +102,72 @@ class MessageReadViewModel(
      */
     suspend fun loadAttachmentBytes(index: Int): Result<ByteArray> =
         repo.fetchAttachment(folder, uid, index)
+
+    /**
+     * Build a reply draft from the loaded message and emit it via [draftReady].
+     * Reply targets Reply-To if the sender set one, else From. Threads via
+     * In-Reply-To = original Message-ID and the References chain. Carries NO
+     * original attachments (a reply is new content, not a re-send). Read receipt
+     * is left off by default.
+     */
+    fun reply() {
+        val s = _uiState.value
+        if (!s.found) return
+        val messageId = ReplyForward.headerValue(s.headers, "message-id")
+        _draftReady.value = ComposeDraft(
+            to = ReplyForward.headerValue(s.headers, "reply-to") ?: s.from,
+            subject = ReplyForward.replySubject(s.subject),
+            body = ReplyForward.quotedReply(
+                from = s.from,
+                date = ReplyForward.headerValue(s.headers, "date").orEmpty(),
+                body = s.bodyPlain.orEmpty(),
+            ),
+            inReplyTo = messageId,
+            references = ReplyForward.referencesChain(
+                ReplyForward.headerValue(s.headers, "references"),
+                messageId,
+            ),
+        )
+    }
+
+    /**
+     * Build a forward draft. Fetches each original attachment's bytes so the
+     * forward carries them, then emits the draft via [draftReady]. Recipients
+     * are left empty (the user chooses). Threading headers are omitted — a
+     * forward starts a new thread.
+     */
+    fun forward() {
+        val s = _uiState.value
+        if (!s.found) return
+        _preparingForward.value = true
+        viewModelScope.launch {
+            val carried = s.attachments.mapIndexedNotNull { index, a ->
+                loadAttachmentBytes(index).getOrNull()?.let { bytes ->
+                    OutboundAttachment(filename = a.filename, mimeType = a.mimeType, bytes = bytes)
+                }
+            }
+            _preparingForward.value = false
+            _draftReady.value = ComposeDraft(
+                to = "",
+                subject = ReplyForward.forwardSubject(s.subject),
+                body = ReplyForward.forwardedBody(
+                    from = s.from,
+                    date = ReplyForward.headerValue(s.headers, "date").orEmpty(),
+                    subject = s.subject,
+                    to = ReplyForward.headerValue(s.headers, "to").orEmpty(),
+                    body = s.bodyPlain.orEmpty(),
+                ),
+                inReplyTo = null,
+                references = null,
+                attachments = carried,
+            )
+        }
+    }
+
+    /** Clear the emitted draft after the screen has consumed it. */
+    fun consumeDraft() {
+        _draftReady.value = null
+    }
 
     /**
      * Optionally mark the open message \Seen. Best-effort: failures are swallowed

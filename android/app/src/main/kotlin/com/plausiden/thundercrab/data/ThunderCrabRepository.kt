@@ -94,6 +94,11 @@ interface ThunderCrabRepository {
         readReceipt: Boolean = false,
         /** Files to attach; empty sends an unattached message unchanged. */
         attachments: List<OutboundAttachment> = emptyList(),
+        /** Original Message-ID (with angle brackets) for a reply's In-Reply-To;
+         *  null for fresh compose / forward (RFC 5322 §3.6.4). */
+        inReplyTo: String? = null,
+        /** References chain to emit; null omits the header. */
+        references: String? = null,
     ): Result<Unit>
 
     /**

@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.plausiden.thundercrab.data.model.Attachment
+import com.plausiden.thundercrab.data.model.ComposeDraft
 import com.plausiden.thundercrab.ui.components.MessageBodyHtml
 import kotlinx.coroutines.launch
 
@@ -61,12 +62,23 @@ import kotlinx.coroutines.launch
 fun MessageReadScreen(
     viewModel: MessageReadViewModel,
     onBack: () -> Unit,
+    onOpenCompose: (ComposeDraft) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val draftReady by viewModel.draftReady.collectAsStateWithLifecycle()
+    val preparingForward by viewModel.preparingForward.collectAsStateWithLifecycle()
 
     // Mark seen once on open (best-effort; VM owns the FFI call).
     LaunchedEffect(Unit) {
         viewModel.markSeen()
+    }
+
+    // When Reply/Forward has built a draft, hand it to the compose flow.
+    LaunchedEffect(draftReady) {
+        draftReady?.let { draft ->
+            onOpenCompose(draft)
+            viewModel.consumeDraft()
+        }
     }
 
     Scaffold(
@@ -79,6 +91,19 @@ fun MessageReadScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
                         )
+                    }
+                },
+                actions = {
+                    if (state.found) {
+                        TextButton(onClick = { viewModel.reply() }) { Text("Reply") }
+                        if (preparingForward) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(horizontal = 12.dp).height(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            TextButton(onClick = { viewModel.forward() }) { Text("Forward") }
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

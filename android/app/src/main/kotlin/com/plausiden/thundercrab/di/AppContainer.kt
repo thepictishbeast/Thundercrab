@@ -14,6 +14,7 @@ import android.content.Context
 import com.plausiden.thundercrab.data.AppPrefs
 import com.plausiden.thundercrab.data.ThunderCrabRepository
 import com.plausiden.thundercrab.data.ThunderCrabRepositoryImpl
+import com.plausiden.thundercrab.data.model.ComposeDraft
 
 /**
  * Manual DI container (ServiceLocator). Holds app-lifetime singletons.
@@ -32,4 +33,12 @@ class AppContainer(context: Context) {
 
     /** On-device appearance + diagnostics-consent prefs (drives live re-theming). */
     val prefs: AppPrefs = AppPrefs(context)
+
+    /**
+     * One-shot hand-off for a prefilled compose (Reply/Forward). The read screen
+     * sets it just before navigating to Compose; the ComposeViewModel reads and
+     * clears it on creation. Avoids URL-encoding a whole draft (body + threading
+     * IDs) into nav args. Holds no credential — the SMTP password is never here.
+     */
+    var pendingDraft: ComposeDraft? = null
 }
