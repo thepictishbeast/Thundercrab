@@ -29,7 +29,7 @@
 //!   pooling internally, but ThunderCrab's GUI submits one at a
 //!   time anyway).
 
-use lettre::message::header::{Header, HeaderName, HeaderValue};
+use lettre::message::header::{ContentTransferEncoding, Header, HeaderName, HeaderValue};
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart, header::ContentType};
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::transport::smtp::authentication::Credentials;
@@ -145,27 +145,152 @@ pub async fn send_message(
     crate::tls::ensure_provider();
 
     let email = build_message(message)?;
+    let transport = build_transport(cfg, password, encryption)?;
+    transport
+        .send(email)
+        .await
+        .map(|_response| ())
+        .map_err(|e| BackendError::Transport(format!("smtp send: {e}")))
+}
 
+/// Build an authenticated SMTP transport for `cfg` — shared by
+/// [`send_message`] and [`send_mdn`] so both use the identical TLS / timeout /
+/// credential posture. 587 STARTTLS or 465 implicit TLS per `encryption`.
+fn build_transport(
+    cfg: &AccountConfig,
+    password: &str,
+    encryption: SmtpEncryption,
+) -> Result<AsyncSmtpTransport<Tokio1Executor>, BackendError> {
     let creds = Credentials::new(cfg.username.clone(), password.to_string());
-    let transport = match encryption {
+    let builder = match encryption {
         SmtpEncryption::StartTls => {
             AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
-                .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?
-                .port(cfg.smtp_port)
-                .credentials(creds)
-                .timeout(Some(crate::CONNECT_TIMEOUT)) // explicit + consistent w/ IMAP/sieve (lettre default is 60s)
-                .build()
         }
         SmtpEncryption::ImplicitTls => {
             AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
-                .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?
-                .port(cfg.smtp_port)
-                .credentials(creds)
-                .timeout(Some(crate::CONNECT_TIMEOUT)) // explicit + consistent w/ IMAP/sieve (lettre default is 60s)
-                .build()
         }
-    };
+    }
+    .map_err(|e| BackendError::Transport(format!("smtp builder: {e}")))?;
+    Ok(builder
+        .port(cfg.smtp_port)
+        .credentials(creds)
+        .timeout(Some(crate::CONNECT_TIMEOUT)) // explicit + consistent w/ IMAP/sieve (lettre default is 60s)
+        .build())
+}
 
+/// Inputs for a user-consented read-receipt (MDN) response (RFC 8098). Borrowed
+/// like [`OutboundMessage`]; distinct because an MDN is a fixed `multipart/report`
+/// shape, not free-form mail.
+#[derive(Debug, Clone, Copy)]
+pub struct MdnParams<'a> {
+    /// The user's own address — the MDN `From:` and `Final-Recipient`.
+    pub user_from: &'a str,
+    /// Where the receipt goes: the original sender's `Disposition-Notification-To`.
+    pub notify_to: &'a str,
+    /// The original message's `Message-ID` (with angle brackets), if known.
+    pub original_message_id: Option<&'a str>,
+    /// The original `Subject`, used to derive the MDN subject.
+    pub original_subject: &'a str,
+    /// The reporting user agent identifier (e.g. `ThunderCrab`).
+    pub reporting_ua: &'a str,
+}
+
+/// Build a user-consented MDN (RFC 8098) as a `multipart/report` message.
+///
+/// Exactly two parts — a human-readable `text/plain` and the machine-readable
+/// `message/disposition-notification`. ThunderCrab **deliberately omits** the
+/// optional third part (returned headers / original message) so the receipt
+/// leaks no original content. The disposition is fixed to
+/// `manual-action/MDN-sent-manually; displayed` — it always encodes an explicit
+/// human action, never an automatic one.
+///
+/// # Errors
+/// [`BackendError::Protocol`] if an address is unparseable or lettre rejects the
+/// composed report.
+fn build_mdn(params: &MdnParams<'_>) -> Result<Message, BackendError> {
+    let from = parse_mailbox(params.user_from)?;
+    let to = parse_mailbox(params.notify_to)?;
+
+    // Part 1 — human-readable. The Message-ID is intentionally NOT named here
+    // (it rides only in the machine part) so the visible text carries nothing
+    // that could be considered original content.
+    let human = SinglePart::builder().header(ContentType::TEXT_PLAIN).body(
+        "Your message was displayed on the recipient's device.\r\n\r\nThis Message \
+         Disposition Notification was sent at the recipient's explicit request. It \
+         is not a guarantee the message was read.\r\n"
+            .to_string(),
+    );
+
+    // Part 2 — machine-readable disposition-notification (RFC 8098 §3.1). Fields
+    // are CRLF-terminated; pinned to 7bit (the RFC-preferred encoding) so strict
+    // consumers don't reject a quoted-printable body.
+    let original_id_line = params
+        .original_message_id
+        .map(|id| format!("Original-Message-ID: {id}\r\n"))
+        .unwrap_or_default();
+    let fields = format!(
+        "Reporting-UA: {ua}\r\n\
+         Final-Recipient: rfc822; {from}\r\n\
+         {original_id_line}\
+         Disposition: manual-action/MDN-sent-manually; displayed\r\n",
+        ua = params.reporting_ua,
+        from = params.user_from,
+    );
+    let machine = SinglePart::builder()
+        .header(
+            ContentType::parse("message/disposition-notification")
+                .map_err(|e| BackendError::Protocol(format!("mdn content-type: {e}")))?,
+        )
+        .header(ContentTransferEncoding::SevenBit)
+        .body(fields);
+
+    // Wrapper: multipart/report; report-type=disposition-notification. There is
+    // no `report` MultiPartKind, so the Content-Type is set via a raw parse — and
+    // the `boundary` MUST be supplied explicitly here: lettre reads the boundary
+    // from this header at format time (`MultiPart::boundary()` unwraps the
+    // `boundary` param), and for an unknown kind it neither injects nor derives
+    // one, so an omitted boundary panics. A fixed token is safe — a boundary only
+    // needs to be unique within one message and absent from its parts, which this
+    // is. (Do NOT call `.boundary()`; that unwraps `MultiPartKind::from_mime` and
+    // panics on `report`.)
+    let report = MultiPart::builder()
+        .header(
+            ContentType::parse(
+                "multipart/report; report-type=disposition-notification; \
+                 boundary=\"----=_ThunderCrab_MDN\"",
+            )
+            .map_err(|e| BackendError::Protocol(format!("report content-type: {e}")))?,
+        )
+        .singlepart(human)
+        .singlepart(machine);
+
+    Message::builder()
+        .from(from)
+        .to(to)
+        .subject(format!("Re: {}", params.original_subject))
+        .multipart(report)
+        .map_err(|e| BackendError::Protocol(format!("compose mdn: {e}")))
+}
+
+/// Send a user-consented read-receipt (MDN) to the address the original sender
+/// requested. Mirrors [`send_message`]'s transport posture.
+///
+/// This is only ever reached from an explicit user action (a tap plus the SMTP
+/// password); nothing in ThunderCrab calls it automatically.
+///
+/// # Errors
+/// - `Transport` on any network / TLS / SMTP error.
+/// - `Auth` if the SMTP AUTH step is rejected.
+/// - `Protocol` if the MDN can't be composed (bad address, etc.).
+pub async fn send_mdn(
+    cfg: &AccountConfig,
+    password: &str,
+    encryption: SmtpEncryption,
+    params: &MdnParams<'_>,
+) -> Result<(), BackendError> {
+    crate::tls::ensure_provider();
+    let email = build_mdn(params)?;
+    let transport = build_transport(cfg, password, encryption)?;
     transport
         .send(email)
         .await
@@ -406,5 +531,61 @@ mod tests {
         let mut m = msg("body", None);
         m.read_receipt_to = Some("not an address");
         assert!(build_message(&m).is_err(), "invalid notify address rejected");
+    }
+
+    fn mdn(message_id: Option<&'static str>) -> MdnParams<'static> {
+        MdnParams {
+            user_from: "me@example.com",
+            notify_to: "sender@example.com",
+            original_message_id: message_id,
+            original_subject: "Invoice",
+            reporting_ua: "ThunderCrab",
+        }
+    }
+
+    #[test]
+    fn mdn_is_multipart_report_with_manual_disposition() {
+        // build_mdn must not panic (the .boundary() hazard on the report subtype).
+        let email = build_mdn(&mdn(Some("<orig@host>"))).expect("builds");
+        let wire = String::from_utf8(email.formatted()).expect("utf8");
+        assert!(wire.contains("multipart/report"), "report wrapper:\n{wire}");
+        assert!(
+            wire.contains("report-type=disposition-notification"),
+            "report-type param:\n{wire}"
+        );
+        assert!(
+            wire.contains("message/disposition-notification"),
+            "machine part:\n{wire}"
+        );
+        assert!(
+            wire.contains("Disposition: manual-action/MDN-sent-manually; displayed"),
+            "explicit-action disposition:\n{wire}"
+        );
+        assert!(wire.contains("Original-Message-ID: <orig@host>"), "orig id:\n{wire}");
+        assert!(wire.contains("Subject: Re: Invoice"), "subject:\n{wire}");
+    }
+
+    #[test]
+    fn mdn_omits_original_content_parts() {
+        // Privacy invariant: no returned message / returned-headers part.
+        let wire =
+            String::from_utf8(build_mdn(&mdn(Some("<orig@host>"))).expect("builds").formatted())
+                .expect("utf8");
+        assert!(!wire.contains("message/rfc822"), "no returned message part:\n{wire}");
+        assert!(!wire.contains("text/rfc822-headers"), "no returned headers part:\n{wire}");
+    }
+
+    #[test]
+    fn mdn_omits_message_id_line_when_absent() {
+        let wire = String::from_utf8(build_mdn(&mdn(None)).expect("builds").formatted())
+            .expect("utf8");
+        assert!(!wire.contains("Original-Message-ID"), "no msg-id line:\n{wire}");
+    }
+
+    #[test]
+    fn mdn_rejects_bad_address() {
+        let mut p = mdn(None);
+        p.user_from = "garbage";
+        assert!(build_mdn(&p).is_err(), "invalid from rejected");
     }
 }
