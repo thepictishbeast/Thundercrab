@@ -13,6 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 thundercrab-imap = { path = "../thundercrab-imap" }
+# Compose renders the Markdown body to sanitized HTML for the message's
+# multipart/alternative HTML part (the same helper the FFI/Android use).
+thundercrab-core = { path = "../thundercrab-core" }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

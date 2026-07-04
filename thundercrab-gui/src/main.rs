@@ -47,12 +47,15 @@
 use std::sync::{Arc, LazyLock};
 
 use iced::widget::{
-    Column, button, column, container, markdown, row, scrollable, text, text_input,
+    Column, button, column, container, markdown, row, scrollable, text, text_editor,
+    text_input,
 };
 use iced::{Color, Element, Length, Task, Theme, theme::Palette};
+use thundercrab_core::mail_html::markdown_to_safe_html;
 use thundercrab_imap::{
     AccountConfig, Backend, FolderSummary, body::Attachment,
     rust_imap::{RustImapBackend, text_search_criterion},
+    smtp::{OutboundAttachment, OutboundMessage, SmtpEncryption, send_message},
 };
 
 /// Entry point.
@@ -109,7 +112,8 @@ fn theme(state: &App) -> Theme {
     active_theme(state.dark)
 }
 
-/// Which screen is on top. Connect → Folders → Messages → Reading.
+/// Which screen is on top. Connect → Folders → Messages → Reading, plus a
+/// Compose screen reachable from Folders/Messages.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     #[default]
@@ -117,6 +121,17 @@ enum Screen {
     Folders,
     Messages,
     Reading,
+    Compose,
+}
+
+/// One staged outgoing attachment (owned bytes). Borrowed into an
+/// [`OutboundAttachment`] at send time; kept owned in state so the compose list
+/// survives across edits.
+#[derive(Debug, Clone)]
+struct ComposeAttachment {
+    filename: String,
+    mime_type: String,
+    bytes: Vec<u8>,
 }
 
 /// A one-line message summary for the list (header-only).
@@ -194,6 +209,20 @@ struct App {
     reading_attachments: Vec<Attachment>,
     /// Whether the move-to-folder picker is expanded in the read view.
     show_move_picker: bool,
+
+    // Compose. `compose_body` is a multi-line editor buffer (not `Send`, so it
+    // lives here and never in a `Message`); `None` until a compose is started.
+    to: String,
+    cc: String,
+    subject: String,
+    compose_body: Option<text_editor::Content>,
+    request_receipt: bool,
+    compose_attachments: Vec<ComposeAttachment>,
+    /// SMTP password captured just for the send; cleared immediately after.
+    smtp_password: String,
+    /// True while the send password prompt is showing.
+    asking_send_password: bool,
+    sending: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +274,25 @@ enum Message {
     DeleteCurrent,
     /// An action finished: `Ok(status)` triggers a folder refresh.
     ActionDone(Result<String, String>),
+
+    // --- Compose ---
+    OpenCompose,
+    ToChanged(String),
+    CcChanged(String),
+    SubjectChanged(String),
+    ComposeBodyAction(text_editor::Action),
+    ToggleReceipt(bool),
+    PickComposeAttachment,
+    /// A picked file was read (or the dialog was cancelled → `Ok(None)`), or an
+    /// error (too large / unreadable).
+    ComposeAttachmentPicked(Result<Option<ComposeAttachment>, String>),
+    RemoveComposeAttachment(usize),
+    /// Show the "enter SMTP password" prompt (guarded on To + Subject).
+    StartSend,
+    SmtpPasswordChanged(String),
+    CancelSend,
+    ConfirmSend,
+    Sent(Result<(), String>),
 }
 
 impl App {
@@ -508,6 +556,113 @@ impl App {
                 self.body_note = format!("Action failed: {e}");
                 Task::none()
             }
+
+            // --- Compose ---
+            Message::OpenCompose => {
+                self.to.clear();
+                self.cc.clear();
+                self.subject.clear();
+                self.compose_body = Some(text_editor::Content::new());
+                self.request_receipt = false;
+                self.compose_attachments.clear();
+                self.smtp_password.clear();
+                self.asking_send_password = false;
+                self.sending = false;
+                self.screen = Screen::Compose;
+                Task::none()
+            }
+            Message::ToChanged(s) => {
+                self.to = s;
+                Task::none()
+            }
+            Message::CcChanged(s) => {
+                self.cc = s;
+                Task::none()
+            }
+            Message::SubjectChanged(s) => {
+                self.subject = s;
+                Task::none()
+            }
+            Message::ComposeBodyAction(action) => {
+                if let Some(content) = &mut self.compose_body {
+                    content.perform(action);
+                }
+                Task::none()
+            }
+            Message::ToggleReceipt(on) => {
+                self.request_receipt = on;
+                Task::none()
+            }
+            Message::PickComposeAttachment => {
+                Task::perform(pick_compose_attachment(), Message::ComposeAttachmentPicked)
+            }
+            Message::ComposeAttachmentPicked(Ok(Some(att))) => {
+                self.compose_attachments.push(att);
+                Task::none()
+            }
+            Message::ComposeAttachmentPicked(Ok(None)) => Task::none(),
+            Message::ComposeAttachmentPicked(Err(e)) => {
+                self.status = format!("Attach failed: {e}");
+                Task::none()
+            }
+            Message::RemoveComposeAttachment(index) => {
+                if index < self.compose_attachments.len() {
+                    self.compose_attachments.remove(index);
+                }
+                Task::none()
+            }
+            Message::StartSend => {
+                // Guard: need at least one recipient and a subject.
+                if self.to.trim().is_empty() || self.subject.trim().is_empty() {
+                    self.status = "To and Subject are required.".into();
+                    return Task::none();
+                }
+                self.asking_send_password = true;
+                Task::none()
+            }
+            Message::SmtpPasswordChanged(s) => {
+                self.smtp_password = s;
+                Task::none()
+            }
+            Message::CancelSend => {
+                self.asking_send_password = false;
+                self.smtp_password.clear();
+                Task::none()
+            }
+            Message::ConfirmSend => {
+                self.asking_send_password = false;
+                self.sending = true;
+                let cfg = self.account();
+                let from = self.user.clone();
+                let to = split_addrs(&self.to);
+                let cc = split_addrs(&self.cc);
+                let subject = self.subject.clone();
+                let body = self.compose_body.as_ref().map(text_editor::Content::text).unwrap_or_default();
+                let receipt = self.request_receipt;
+                let attachments = self.compose_attachments.clone();
+                // Move the captured password into the task and drop our copy.
+                let password = std::mem::take(&mut self.smtp_password);
+                Task::perform(
+                    send(SendJob { cfg, password, from, to, cc, subject, body, receipt, attachments }),
+                    Message::Sent,
+                )
+            }
+            Message::Sent(Ok(())) => {
+                self.sending = false;
+                self.status = "Message sent.".into();
+                self.compose_body = None;
+                self.compose_attachments.clear();
+                self.to.clear();
+                self.cc.clear();
+                self.subject.clear();
+                self.screen = if self.folder.is_empty() { Screen::Folders } else { Screen::Messages };
+                Task::none()
+            }
+            Message::Sent(Err(e)) => {
+                self.sending = false;
+                self.status = format!("Send failed: {e}");
+                Task::none()
+            }
         }
     }
 
@@ -517,6 +672,7 @@ impl App {
             Screen::Folders => self.folders_view(),
             Screen::Messages => self.messages_view(),
             Screen::Reading => self.reading_view(),
+            Screen::Compose => self.compose_view(),
         };
         container(body)
             .width(Length::Fill)
@@ -566,6 +722,7 @@ impl App {
         column![
             row![
                 text("Folders").size(24).width(Length::Fill),
+                button(text("Compose")).on_press(Message::OpenCompose),
                 button(text("Sign out")).on_press(Message::Logout),
                 self.theme_toggle(),
             ]
@@ -581,6 +738,7 @@ impl App {
         let top = row![
             button(text("← Folders")).on_press(Message::Back),
             text(prettify(&self.folder)).size(22).width(Length::Fill),
+            button(text("Compose")).on_press(Message::OpenCompose),
             self.theme_toggle(),
         ]
         .spacing(12);
@@ -710,6 +868,99 @@ impl App {
 
         col = col.push(scrollable(body).height(Length::Fill));
         col.spacing(10).into()
+    }
+
+    fn compose_view(&self) -> Element<'_, Message> {
+        let top = row![
+            button(text("← Discard")).on_press(Message::Back),
+            text("New message").size(22).width(Length::Fill),
+            self.theme_toggle(),
+        ]
+        .spacing(12);
+
+        // Password prompt: shown when the user hits Send. Kept inline (iced has
+        // no modal); the password is used once and never stored.
+        if self.asking_send_password {
+            let prompt = column![
+                text("Enter your mail password to send.").size(15),
+                text("It is used once for this send and never stored.").size(12),
+                secure_field("Password", &self.smtp_password, Message::SmtpPasswordChanged),
+                row![
+                    button(text(if self.sending { "Sending…" } else { "Send" })).on_press_maybe(
+                        (!self.smtp_password.is_empty() && !self.sending)
+                            .then_some(Message::ConfirmSend),
+                    ),
+                    button(text("Cancel")).on_press(Message::CancelSend),
+                ]
+                .spacing(12),
+            ]
+            .spacing(10);
+            return column![top, prompt].spacing(16).into();
+        }
+
+        let fields = column![
+            field("To", "someone@example.com", &self.to, Message::ToChanged),
+            field("Cc (optional)", "", &self.cc, Message::CcChanged),
+            field("Subject", "", &self.subject, Message::SubjectChanged),
+        ]
+        .spacing(8);
+
+        // Multi-line Markdown body via the text editor buffer.
+        let body_editor: Element<'_, Message> = self.compose_body.as_ref().map_or_else(
+            || text("(compose buffer not ready)").into(),
+            |content| {
+                text_editor(content)
+                    .placeholder("Write your message (Markdown supported)…")
+                    .on_action(Message::ComposeBodyAction)
+                    .height(Length::Fixed(240.0))
+                    .into()
+            },
+        );
+
+        // Attachment picker + staged chips (removable).
+        let mut attach_col = column![
+            row![
+                button(text("Attach file")).on_press(Message::PickComposeAttachment),
+                text("Max 25 MB each").size(12),
+            ]
+            .spacing(12),
+        ]
+        .spacing(6);
+        for (i, a) in self.compose_attachments.iter().enumerate() {
+            attach_col = attach_col.push(
+                row![
+                    text(format!("{} · {}", a.filename, human_size(a.bytes.len())))
+                        .size(13)
+                        .width(Length::Fill),
+                    button(text("✕").size(13)).on_press(Message::RemoveComposeAttachment(i)),
+                ]
+                .spacing(8),
+            );
+        }
+
+        let receipt_row = row![
+            text("Request read receipt").size(14).width(Length::Fill),
+            iced::widget::checkbox(self.request_receipt).on_toggle(Message::ToggleReceipt),
+        ]
+        .spacing(8);
+
+        let can_send = !self.to.trim().is_empty() && !self.subject.trim().is_empty() && !self.sending;
+        let send_row = row![
+            button(text("Send")).on_press_maybe(can_send.then_some(Message::StartSend)),
+            text(&self.status).size(12),
+        ]
+        .spacing(12);
+
+        let form = column![
+            fields,
+            body_editor,
+            attach_col,
+            receipt_row,
+            send_row,
+        ]
+        .spacing(14);
+
+        column![top, scrollable(form).height(Length::Fill)].spacing(16).into()
     }
 
     /// A compact theme-toggle button, shown in every screen's top bar.
@@ -897,4 +1148,117 @@ async fn run_action(
             Ok(format!("Moved to {to}"))
         }
     }
+}
+
+/// Cap on how large a picked file we'll read into memory for a compose
+/// attachment (25 MB) — guards against OOM and mirrors the Android limit; most
+/// mail servers reject larger messages anyway.
+const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
+/// Split a raw recipient string on commas / semicolons / whitespace into
+/// trimmed, non-empty addresses.
+fn split_addrs(raw: &str) -> Vec<String> {
+    raw.split([',', ';', '\n', ' '])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Best-effort MIME type from a file extension. The SMTP layer falls back to
+/// `application/octet-stream` for anything it can't parse, so an unknown
+/// extension here is harmless.
+fn mime_for_path(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("pdf") => "application/pdf",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("txt") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("html" | "htm") => "text/html",
+        Some("csv") => "text/csv",
+        Some("json") => "application/json",
+        Some("zip") => "application/zip",
+        Some("doc") => "application/msword",
+        Some("docx") => {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }
+        _ => "application/octet-stream",
+    }
+}
+
+/// Async: prompt for a file to attach, read it, enforce the size cap, and infer
+/// its MIME type. `Ok(None)` means the dialog was cancelled (benign).
+async fn pick_compose_attachment() -> Result<Option<ComposeAttachment>, String> {
+    let Some(handle) = rfd::AsyncFileDialog::new().pick_file().await else {
+        return Ok(None);
+    };
+    let path = handle.path().to_path_buf();
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    if bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err(format!("{} is larger than 25 MB", path.display()));
+    }
+    let filename = path.file_name().map_or_else(
+        || "attachment".to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let mime_type = mime_for_path(&path).to_string();
+    Ok(Some(ComposeAttachment { filename, mime_type, bytes }))
+}
+
+/// Everything one send needs, owned. Bundled into a struct so the send fn takes
+/// a single argument (not nine).
+struct SendJob {
+    cfg: AccountConfig,
+    password: String,
+    from: String,
+    to: Vec<String>,
+    cc: Vec<String>,
+    subject: String,
+    body: String,
+    receipt: bool,
+    attachments: Vec<ComposeAttachment>,
+}
+
+/// Async: build and send one message over STARTTLS (587). The Markdown source
+/// travels as the text/plain part; its sanitized HTML rendering is the
+/// alternative (so HTML clients show formatting and others fall back). A blank
+/// body sends no HTML part. `read_receipt_to` is the sender's own address when
+/// requested. The password is used here and dropped when the task ends.
+async fn send(job: SendJob) -> Result<(), String> {
+    let to_refs: Vec<&str> = job.to.iter().map(String::as_str).collect();
+    let cc_refs: Vec<&str> = job.cc.iter().map(String::as_str).collect();
+    let html = markdown_to_safe_html(&job.body);
+    let att_views: Vec<OutboundAttachment> = job
+        .attachments
+        .iter()
+        .map(|a| OutboundAttachment {
+            filename: &a.filename,
+            mime_type: &a.mime_type,
+            bytes: &a.bytes,
+        })
+        .collect();
+    let msg = OutboundMessage {
+        from: &job.from,
+        to: &to_refs,
+        cc: &cc_refs,
+        subject: &job.subject,
+        body: &job.body,
+        html_body: if job.body.trim().is_empty() { None } else { Some(html.as_str()) },
+        read_receipt_to: job.receipt.then_some(job.from.as_str()),
+        attachments: &att_views,
+    };
+    send_message(&job.cfg, &job.password, SmtpEncryption::StartTls, &msg)
+        .await
+        .map_err(|e| format!("send: {e}"))
 }
