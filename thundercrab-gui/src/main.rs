@@ -53,7 +53,7 @@ use iced::widget::{
 use iced::{Color, Element, Length, Task, Theme, theme::Palette};
 use thundercrab_core::mail_html::markdown_to_safe_html;
 use thundercrab_imap::{
-    AccountConfig, Backend, FolderSummary, body::Attachment,
+    AccountConfig, Backend, FolderSummary, body::Attachment, reply,
     rust_imap::{RustImapBackend, text_search_criterion},
     smtp::{OutboundAttachment, OutboundMessage, SmtpEncryption, send_message},
 };
@@ -140,6 +140,9 @@ struct Row {
     uid: u32,
     from: String,
     subject: String,
+    /// The message's other headers (lowercased names), carried so Reply/Forward
+    /// can read Message-ID / References / Reply-To / Date without a re-fetch.
+    headers: Vec<(String, String)>,
 }
 
 /// A loaded body, ready to display. The markdown source is carried as a String
@@ -201,6 +204,10 @@ struct App {
     reading_uid: u32,
     reading_from: String,
     reading_subject: String,
+    /// The open message's other headers, kept for Reply/Forward threading.
+    reading_headers: Vec<(String, String)>,
+    /// The open message's plain-text/Markdown source, kept for quoting on reply.
+    reading_body_plain: String,
     body: Option<markdown::Content>,
     body_note: String,
     loading_body: bool,
@@ -218,6 +225,9 @@ struct App {
     compose_body: Option<text_editor::Content>,
     request_receipt: bool,
     compose_attachments: Vec<ComposeAttachment>,
+    /// RFC 5322 threading for a reply-in-progress; `None` for fresh/forward.
+    compose_in_reply_to: Option<String>,
+    compose_references: Option<String>,
     /// SMTP password captured just for the send; cleared immediately after.
     smtp_password: String,
     /// True while the send password prompt is showing.
@@ -278,6 +288,11 @@ enum Message {
     /// (the message left the open folder → return to the list and refresh),
     /// `false` for flag toggles (stay in the reader; nothing left the folder).
     ActionDone(Result<String, String>, bool),
+
+    /// Open a reply to the current message (prefilled + threaded).
+    Reply,
+    /// Open a forward of the current message (prefilled, carries attachments).
+    Forward,
 
     // --- Compose ---
     OpenCompose,
@@ -357,9 +372,38 @@ impl App {
         self.to.clear();
         self.cc.clear();
         self.subject.clear();
+        self.compose_in_reply_to = None;
+        self.compose_references = None;
         self.confirm_discard = false;
         self.screen = if self.folder.is_empty() { Screen::Folders } else { Screen::Messages };
         Task::none()
+    }
+
+    /// Enter the compose screen with the given prefill. Shared by fresh compose
+    /// (all empty) and Reply/Forward (prefilled recipients/subject/body plus, for
+    /// a reply, the RFC 5322 threading IDs). Resets all transient send state.
+    fn start_compose(
+        &mut self,
+        to: String,
+        subject: String,
+        body: &str,
+        attachments: Vec<ComposeAttachment>,
+        in_reply_to: Option<String>,
+        references: Option<String>,
+    ) {
+        self.to = to;
+        self.cc.clear();
+        self.subject = subject;
+        self.compose_body = Some(text_editor::Content::with_text(body));
+        self.request_receipt = false;
+        self.compose_attachments = attachments;
+        self.compose_in_reply_to = in_reply_to;
+        self.compose_references = references;
+        self.smtp_password.clear();
+        self.asking_send_password = false;
+        self.sending = false;
+        self.confirm_discard = false;
+        self.screen = Screen::Compose;
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -434,8 +478,10 @@ impl App {
                 if let Some(r) = self.messages.iter().find(|r| r.uid == uid) {
                     self.reading_from = r.from.clone();
                     self.reading_subject = r.subject.clone();
+                    self.reading_headers = r.headers.clone();
                 }
                 self.reading_uid = uid;
+                self.reading_body_plain.clear();
                 self.body = None;
                 self.body_note.clear();
                 self.reading_attachments.clear();
@@ -456,6 +502,7 @@ impl App {
                     notes.push(format!("{} attachment(s)", loaded.attachments.len()));
                 }
                 self.body_note = notes.join(" · ");
+                self.reading_body_plain = loaded.markdown;
                 self.reading_attachments = loaded.attachments;
                 Task::none()
             }
@@ -617,19 +664,60 @@ impl App {
                 Task::none()
             }
 
+            // --- Reply / Forward ---
+            Message::Reply => {
+                // Need the body loaded to quote it.
+                if self.loading_body {
+                    return Task::none();
+                }
+                let message_id = reply::header_value(&self.reading_headers, "message-id");
+                let references = reply::references_chain(
+                    reply::header_value(&self.reading_headers, "references"),
+                    message_id,
+                );
+                let in_reply_to = message_id.map(str::to_string);
+                let to = reply::header_value(&self.reading_headers, "reply-to")
+                    .unwrap_or(&self.reading_from)
+                    .to_string();
+                let subject = reply::reply_subject(&self.reading_subject);
+                let body = reply::quoted_reply(
+                    &self.reading_from,
+                    reply::header_value(&self.reading_headers, "date").unwrap_or(""),
+                    &self.reading_body_plain,
+                );
+                self.start_compose(to, subject, &body, Vec::new(), in_reply_to, references);
+                Task::none()
+            }
+            Message::Forward => {
+                if self.loading_body {
+                    return Task::none();
+                }
+                let subject = reply::forward_subject(&self.reading_subject);
+                let body = reply::forwarded_body(
+                    &self.reading_from,
+                    reply::header_value(&self.reading_headers, "date").unwrap_or(""),
+                    &self.reading_subject,
+                    reply::header_value(&self.reading_headers, "to").unwrap_or(""),
+                    &self.reading_body_plain,
+                );
+                // Carry the original attachments (already decoded in memory).
+                let atts: Vec<ComposeAttachment> = self
+                    .reading_attachments
+                    .iter()
+                    .map(|a| ComposeAttachment {
+                        filename: a.filename.clone(),
+                        mime_type: a.mime_type.clone(),
+                        bytes: a.bytes.clone(),
+                    })
+                    .collect();
+                // Forward starts a new thread — no threading headers.
+                self.start_compose(String::new(), subject, &body, atts, None, None);
+                Task::none()
+            }
+
             // --- Compose ---
             Message::OpenCompose => {
-                self.to.clear();
-                self.cc.clear();
-                self.subject.clear();
-                self.compose_body = Some(text_editor::Content::new());
-                self.request_receipt = false;
-                self.compose_attachments.clear();
-                self.smtp_password.clear();
-                self.asking_send_password = false;
-                self.sending = false;
-                self.confirm_discard = false;
-                self.screen = Screen::Compose;
+                self.start_compose(String::new(), String::new(), "", Vec::new(), None, None);
                 Task::none()
             }
             Message::DiscardCompose => {
@@ -718,10 +806,15 @@ impl App {
                 let body = self.compose_body.as_ref().map(text_editor::Content::text).unwrap_or_default();
                 let receipt = self.request_receipt;
                 let attachments = self.compose_attachments.clone();
+                let in_reply_to = self.compose_in_reply_to.clone();
+                let references = self.compose_references.clone();
                 // Move the captured password into the task and drop our copy.
                 let password = std::mem::take(&mut self.smtp_password);
                 Task::perform(
-                    send(SendJob { cfg, password, from, to, cc, subject, body, receipt, attachments }),
+                    send(SendJob {
+                        cfg, password, from, to, cc, subject, body, receipt, attachments,
+                        in_reply_to, references,
+                    }),
                     Message::Sent,
                 )
             }
@@ -891,6 +984,17 @@ impl App {
         ]
         .spacing(2);
 
+        // Reply / Forward need the loaded body to quote/carry it, so they stay
+        // disabled until the fetch completes.
+        let ready = !self.loading_body;
+        let compose_actions = row![
+            button(text("Reply").size(13))
+                .on_press_maybe(ready.then_some(Message::Reply)),
+            button(text("Forward").size(13))
+                .on_press_maybe(ready.then_some(Message::Forward)),
+        ]
+        .spacing(8);
+
         // Action bar. Reading itself never changed \Seen (BODY.PEEK), so read
         // state is an explicit choice here.
         let actions = row![
@@ -908,7 +1012,7 @@ impl App {
         ]
         .spacing(8);
 
-        let mut col = column![top, head, actions].spacing(10);
+        let mut col = column![top, head, compose_actions, actions].spacing(10);
 
         // Move picker: choose a destination folder (excludes the current one).
         if self.show_move_picker {
@@ -1171,7 +1275,7 @@ async fn list_messages(
         .map_err(|e| format!("fetch_headers: {e}"))?;
     Ok(headers
         .into_iter()
-        .map(|h| Row { uid: h.uid, from: h.from, subject: h.subject })
+        .map(|h| Row { uid: h.uid, from: h.from, subject: h.subject, headers: h.other_headers })
         .collect())
 }
 
@@ -1191,7 +1295,7 @@ async fn search_messages(
         .map_err(|e| format!("search: {e}"))?;
     Ok(headers
         .into_iter()
-        .map(|h| Row { uid: h.uid, from: h.from, subject: h.subject })
+        .map(|h| Row { uid: h.uid, from: h.from, subject: h.subject, headers: h.other_headers })
         .collect())
 }
 
@@ -1346,6 +1450,9 @@ struct SendJob {
     body: String,
     receipt: bool,
     attachments: Vec<ComposeAttachment>,
+    /// RFC 5322 threading (reply only); `None` for fresh compose / forward.
+    in_reply_to: Option<String>,
+    references: Option<String>,
 }
 
 /// Async: build and send one message over STARTTLS (587). The Markdown source
@@ -1374,9 +1481,9 @@ async fn send(job: SendJob) -> Result<(), String> {
         body: &job.body,
         html_body: if job.body.trim().is_empty() { None } else { Some(html.as_str()) },
         read_receipt_to: job.receipt.then_some(job.from.as_str()),
-        // Desktop reply/forward is a follow-up; fresh compose isn't threaded.
-        in_reply_to: None,
-        references: None,
+        // RFC 5322 threading on a reply (both None for fresh compose / forward).
+        in_reply_to: job.in_reply_to.as_deref(),
+        references: job.references.as_deref(),
         attachments: &att_views,
     };
     send_message(&job.cfg, &job.password, SmtpEncryption::StartTls, &msg)
