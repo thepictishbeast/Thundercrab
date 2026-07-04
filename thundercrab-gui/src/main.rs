@@ -1374,6 +1374,9 @@ async fn send(job: SendJob) -> Result<(), String> {
         body: &job.body,
         html_body: if job.body.trim().is_empty() { None } else { Some(html.as_str()) },
         read_receipt_to: job.receipt.then_some(job.from.as_str()),
+        // Desktop reply/forward is a follow-up; fresh compose isn't threaded.
+        in_reply_to: None,
+        references: None,
         attachments: &att_views,
     };
     send_message(&job.cfg, &job.password, SmtpEncryption::StartTls, &msg)

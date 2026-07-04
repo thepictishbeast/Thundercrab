@@ -575,6 +575,12 @@ pub struct FfiOutboundMessage {
     /// When set, request a read receipt (RFC 8098) to this address — usually
     /// the sender's own. Opt-in per message; null requests nothing.
     pub read_receipt_to: Option<String>,
+    /// RFC 5322 `Message-ID` of the message being replied to (with angle
+    /// brackets). Set on a reply to emit `In-Reply-To:`; null otherwise.
+    pub in_reply_to: Option<String>,
+    /// Space-separated ancestor `Message-ID` chain for the `References:` header
+    /// (RFC 5322 §3.6.4). Null omits it.
+    pub references: Option<String>,
     /// Files to attach. When non-empty, the whole message is wrapped in
     /// `multipart/mixed` (body first, then each attachment). Empty = no change.
     pub attachments: Vec<FfiOutboundAttachment>,
@@ -943,6 +949,8 @@ pub async fn send_message(
         body: message.body.as_str(),
         html_body: message.html_body.as_deref(),
         read_receipt_to: message.read_receipt_to.as_deref(),
+        in_reply_to: message.in_reply_to.as_deref(),
+        references: message.references.as_deref(),
         attachments: &attachments,
     };
     timed(

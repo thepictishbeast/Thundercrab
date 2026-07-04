@@ -101,6 +101,14 @@ pub struct OutboundMessage<'a> {
     /// can return a Message Disposition Notification to `addr`. Opt-in per
     /// message — `None` requests nothing. Typically the sender's own address.
     pub read_receipt_to: Option<&'a str>,
+    /// RFC 5322 `Message-ID` of the message being replied to, WITH angle
+    /// brackets (e.g. `<abc@host>`). `Some` emits an `In-Reply-To:` header;
+    /// `None` for a fresh compose or a forward (forwards start a new thread).
+    pub in_reply_to: Option<&'a str>,
+    /// Space-separated chain of ancestor `Message-ID`s, each angle-bracketed,
+    /// oldest first (RFC 5322 §3.6.4). `Some` emits a `References:` header —
+    /// typically the original's `References` with its `Message-ID` appended.
+    pub references: Option<&'a str>,
     /// Files to attach. When non-empty, the whole message is wrapped in
     /// `multipart/mixed` (body part first, then each attachment). Empty = no
     /// attachments and the message shape is unchanged (plain or alternative).
@@ -189,6 +197,14 @@ fn build_message(message: &OutboundMessage<'_>) -> Result<Message, BackendError>
         parse_mailbox(addr)?;
         builder = builder.header(DispositionNotificationTo(addr.to_string()));
     }
+    // RFC 5322 §3.6.4 threading. IDs are opaque header strings passed verbatim
+    // WITH their angle brackets; lettre's builder sets the header value.
+    if let Some(irt) = message.in_reply_to {
+        builder = builder.in_reply_to(irt.to_string());
+    }
+    if let Some(refs) = message.references {
+        builder = builder.references(refs.to_string());
+    }
 
     let composed = if message.attachments.is_empty() {
         // No attachments — original shapes: alternative when HTML is present,
@@ -269,6 +285,8 @@ mod tests {
             body,
             html_body: html,
             read_receipt_to: None,
+            in_reply_to: None,
+            references: None,
             attachments: &[],
         }
     }
@@ -312,9 +330,37 @@ mod tests {
             body: "x",
             html_body: None,
             read_receipt_to: None,
+            in_reply_to: None,
+            references: None,
             attachments: &[],
         };
         assert!(build_message(&bad).is_err());
+    }
+
+    #[test]
+    fn no_threading_headers_by_default() {
+        let email = build_message(&msg("body", None)).expect("builds");
+        let wire = String::from_utf8(email.formatted()).expect("utf8");
+        assert!(!wire.contains("In-Reply-To:"), "no In-Reply-To by default:\n{wire}");
+        assert!(!wire.contains("References:"), "no References by default:\n{wire}");
+    }
+
+    #[test]
+    fn threading_headers_appear_verbatim() {
+        let mut m = msg("body", None);
+        m.in_reply_to = Some("<orig@host>");
+        m.references = Some("<a@host> <orig@host>");
+        let email = build_message(&m).expect("builds");
+        let wire = String::from_utf8(email.formatted()).expect("utf8");
+        // IDs are emitted with their angle brackets, not doubled or stripped.
+        assert!(
+            wire.contains("In-Reply-To: <orig@host>"),
+            "In-Reply-To verbatim:\n{wire}"
+        );
+        assert!(
+            wire.contains("References: <a@host> <orig@host>"),
+            "References verbatim:\n{wire}"
+        );
     }
 
     #[test]

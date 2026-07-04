@@ -165,6 +165,37 @@ impl MessageHeaders {
             .find(|(name, _)| name == "disposition-notification-to")
             .map(|(_, value)| value.as_str())
     }
+
+    /// This message's `Message-ID` (with angle brackets), used as `In-Reply-To`
+    /// when replying (RFC 5322 §3.6.4). Header names in `other_headers` are
+    /// lowercased.
+    #[must_use]
+    pub fn message_id(&self) -> Option<&str> {
+        self.other_headers
+            .iter()
+            .find(|(name, _)| name == "message-id")
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// This message's `References` chain, if any — the ancestor `Message-ID`s.
+    /// A reply's `References` is this value with [`Self::message_id`] appended.
+    #[must_use]
+    pub fn references(&self) -> Option<&str> {
+        self.other_headers
+            .iter()
+            .find(|(name, _)| name == "references")
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The `Reply-To` address if the sender set one; a reply targets this in
+    /// preference to `From`.
+    #[must_use]
+    pub fn reply_to(&self) -> Option<&str> {
+        self.other_headers
+            .iter()
+            .find(|(name, _)| name == "reply-to")
+            .map(|(_, value)| value.as_str())
+    }
 }
 
 /// Backend-agnostic mailbox operations.

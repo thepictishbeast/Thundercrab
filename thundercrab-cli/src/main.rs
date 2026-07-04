@@ -427,6 +427,9 @@ async fn cmd_send(
         html_body: html_owned.as_deref(),
         // Request the receipt to the sending account when --read-receipt is set.
         read_receipt_to: read_receipt.then_some(from),
+        // The CLI sends fresh messages only (no reply threading).
+        in_reply_to: None,
+        references: None,
         attachments: &atts,
     };
     let enc = match encryption {
