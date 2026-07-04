@@ -223,6 +223,8 @@ struct App {
     /// True while the send password prompt is showing.
     asking_send_password: bool,
     sending: bool,
+    /// True while the "discard this draft?" confirmation is showing.
+    confirm_discard: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -272,8 +274,10 @@ enum Message {
     ShowMovePicker(bool),
     /// Move the open message to the Trash special-use folder.
     DeleteCurrent,
-    /// An action finished: `Ok(status)` triggers a folder refresh.
-    ActionDone(Result<String, String>),
+    /// An action finished. The `bool` is `left_folder`: `true` for Move/Delete
+    /// (the message left the open folder → return to the list and refresh),
+    /// `false` for flag toggles (stay in the reader; nothing left the folder).
+    ActionDone(Result<String, String>, bool),
 
     // --- Compose ---
     OpenCompose,
@@ -287,6 +291,12 @@ enum Message {
     /// error (too large / unreadable).
     ComposeAttachmentPicked(Result<Option<ComposeAttachment>, String>),
     RemoveComposeAttachment(usize),
+    /// Discard button in compose: confirms first if the draft has content.
+    DiscardCompose,
+    /// Confirm discarding the draft (leaves compose).
+    ConfirmDiscard,
+    /// Dismiss the discard confirmation and keep editing.
+    KeepEditing,
     /// Show the "enter SMTP password" prompt (guarded on To + Subject).
     StartSend,
     SmtpPasswordChanged(String),
@@ -323,8 +333,33 @@ impl App {
             return Task::none();
         };
         self.is_search_result = false;
+        // Abandon any in-flight search: its late SearchLoaded is then ignored
+        // (see the `searching` guard there) so it can't clobber these headers.
+        self.searching = false;
         self.loading_messages = true;
         Task::perform(list_messages(session, self.folder.clone()), Message::MessagesLoaded)
+    }
+
+    /// Whether the compose form holds anything worth confirming before discard.
+    fn compose_dirty(&self) -> bool {
+        self.compose_body.as_ref().is_some_and(|c| !c.text().trim().is_empty())
+            || !self.to.trim().is_empty()
+            || !self.cc.trim().is_empty()
+            || !self.subject.trim().is_empty()
+            || !self.compose_attachments.is_empty()
+    }
+
+    /// Leave the compose screen, clearing the draft, and return to wherever it
+    /// was opened from (the message list if a folder is open, else Folders).
+    fn leave_compose(&mut self) -> Task<Message> {
+        self.compose_body = None;
+        self.compose_attachments.clear();
+        self.to.clear();
+        self.cc.clear();
+        self.subject.clear();
+        self.confirm_discard = false;
+        self.screen = if self.folder.is_empty() { Screen::Folders } else { Screen::Messages };
+        Task::none()
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -375,6 +410,8 @@ impl App {
                 self.messages.clear();
                 self.search_query.clear();
                 self.is_search_result = false;
+                self.searching = false;
+                self.status.clear();
                 self.loading_messages = true;
                 self.screen = Screen::Messages;
                 Task::perform(list_messages(session, name), Message::MessagesLoaded)
@@ -430,6 +467,9 @@ impl App {
             Message::Back => {
                 self.screen = match self.screen {
                     Screen::Reading => Screen::Messages,
+                    // Discarding a compose returns to wherever it was opened
+                    // from — the message list if a folder is open, else Folders.
+                    Screen::Compose if !self.folder.is_empty() => Screen::Messages,
                     _ => Screen::Folders,
                 };
                 Task::none()
@@ -486,12 +526,21 @@ impl App {
                 self.reload_folder()
             }
             Message::SearchLoaded(Ok(rows)) => {
+                // Ignore a result whose search was abandoned (Clear / empty
+                // submit / folder switch reset `searching`) — it must not
+                // clobber the folder headers that replaced it.
+                if !self.searching {
+                    return Task::none();
+                }
                 self.searching = false;
                 self.is_search_result = true;
                 self.messages = rows;
                 Task::none()
             }
             Message::SearchLoaded(Err(e)) => {
+                if !self.searching {
+                    return Task::none();
+                }
                 self.searching = false;
                 self.status = format!("Search failed: {e}");
                 Task::none()
@@ -529,8 +578,13 @@ impl App {
                     return Task::none();
                 };
                 self.show_move_picker = false;
+                // Only Move removes the message from the open folder; flag toggles
+                // leave it in place, so the reader should stay put.
+                let left_folder = matches!(action, Action::Move(_));
                 let (folder, uid) = (self.folder.clone(), self.reading_uid);
-                Task::perform(run_action(session, folder, uid, action), Message::ActionDone)
+                Task::perform(run_action(session, folder, uid, action), move |r| {
+                    Message::ActionDone(r, left_folder)
+                })
             }
             Message::DeleteCurrent => {
                 let Some(session) = self.session.clone() else {
@@ -543,16 +597,22 @@ impl App {
                 let (folder, uid) = (self.folder.clone(), self.reading_uid);
                 Task::perform(
                     run_action(session, folder, uid, Action::Move(trash)),
-                    Message::ActionDone,
+                    |r| Message::ActionDone(r, true),
                 )
             }
-            Message::ActionDone(Ok(note)) => {
-                // Action changed the folder; return to the list and refresh it.
-                self.status = note;
-                self.screen = Screen::Messages;
-                self.reload_folder()
+            Message::ActionDone(Ok(note), left_folder) => {
+                if left_folder {
+                    // The message left the folder — return to the list and refresh.
+                    self.status = note;
+                    self.screen = Screen::Messages;
+                    self.reload_folder()
+                } else {
+                    // A flag toggle: stay in the reader; show the confirmation.
+                    self.body_note = note;
+                    Task::none()
+                }
             }
-            Message::ActionDone(Err(e)) => {
+            Message::ActionDone(Err(e), _) => {
                 self.body_note = format!("Action failed: {e}");
                 Task::none()
             }
@@ -568,7 +628,24 @@ impl App {
                 self.smtp_password.clear();
                 self.asking_send_password = false;
                 self.sending = false;
+                self.confirm_discard = false;
                 self.screen = Screen::Compose;
+                Task::none()
+            }
+            Message::DiscardCompose => {
+                if self.compose_dirty() {
+                    self.confirm_discard = true;
+                    Task::none()
+                } else {
+                    self.leave_compose()
+                }
+            }
+            Message::ConfirmDiscard => {
+                self.confirm_discard = false;
+                self.leave_compose()
+            }
+            Message::KeepEditing => {
+                self.confirm_discard = false;
                 Task::none()
             }
             Message::ToChanged(s) => {
@@ -630,7 +707,8 @@ impl App {
                 Task::none()
             }
             Message::ConfirmSend => {
-                self.asking_send_password = false;
+                // Keep the prompt up (showing a disabled "Sending…") until the
+                // send resolves; Sent(Ok/Err) dismisses it.
                 self.sending = true;
                 let cfg = self.account();
                 let from = self.user.clone();
@@ -649,6 +727,7 @@ impl App {
             }
             Message::Sent(Ok(())) => {
                 self.sending = false;
+                self.asking_send_password = false;
                 self.status = "Message sent.".into();
                 self.compose_body = None;
                 self.compose_attachments.clear();
@@ -660,6 +739,10 @@ impl App {
             }
             Message::Sent(Err(e)) => {
                 self.sending = false;
+                // Dismiss the prompt back to the editable form so the error and
+                // the retained draft are visible; the password was already
+                // consumed, so a retry re-prompts.
+                self.asking_send_password = false;
                 self.status = format!("Send failed: {e}");
                 Task::none()
             }
@@ -762,6 +845,14 @@ impl App {
             container(text("")).into()
         };
 
+        // Surface load/search errors and action confirmations, which the update
+        // handlers write to `status` while this screen is showing.
+        let status_note: Element<'_, Message> = if self.status.is_empty() {
+            container(text("")).into()
+        } else {
+            text(&self.status).size(13).into()
+        };
+
         let inner: Element<'_, Message> = if self.loading_messages || self.searching {
             text(if self.searching { "Searching…" } else { "Loading messages…" }).into()
         } else if self.messages.is_empty() {
@@ -783,7 +874,7 @@ impl App {
             scrollable(list).height(Length::Fill).into()
         };
 
-        column![top, search_bar, count_note, inner].spacing(12).into()
+        column![top, search_bar, status_note, count_note, inner].spacing(12).into()
     }
 
     fn reading_view(&self) -> Element<'_, Message> {
@@ -809,6 +900,8 @@ impl App {
                 .on_press(Message::DoAction(Action::Flag("\\Seen", false))),
             button(text("★ Flag").size(13))
                 .on_press(Message::DoAction(Action::Flag("\\Flagged", true))),
+            button(text("☆ Unflag").size(13))
+                .on_press(Message::DoAction(Action::Flag("\\Flagged", false))),
             button(text("Move…").size(13))
                 .on_press(Message::ShowMovePicker(!self.show_move_picker)),
             button(text("Delete").size(13)).on_press(Message::DeleteCurrent),
@@ -831,8 +924,15 @@ impl App {
                 );
             }
             col = col.push(
-                column![text("Move to:").size(13), scrollable(picker).height(Length::Fixed(160.0))]
-                    .spacing(4),
+                column![
+                    row![
+                        text("Move to:").size(13).width(Length::Fill),
+                        button(text("Cancel").size(13)).on_press(Message::ShowMovePicker(false)),
+                    ]
+                    .spacing(8),
+                    scrollable(picker).height(Length::Fixed(160.0)),
+                ]
+                .spacing(4),
             );
         }
 
@@ -872,15 +972,31 @@ impl App {
 
     fn compose_view(&self) -> Element<'_, Message> {
         let top = row![
-            button(text("← Discard")).on_press(Message::Back),
+            button(text("← Discard")).on_press(Message::DiscardCompose),
             text("New message").size(22).width(Length::Fill),
             self.theme_toggle(),
         ]
         .spacing(12);
 
-        // Password prompt: shown when the user hits Send. Kept inline (iced has
-        // no modal); the password is used once and never stored.
-        if self.asking_send_password {
+        // Discard confirmation: only reached when the draft has content.
+        if self.confirm_discard {
+            let confirm = column![
+                text("Discard this draft?").size(15),
+                text("Your message and attachments will be lost.").size(12),
+                row![
+                    button(text("Discard")).on_press(Message::ConfirmDiscard),
+                    button(text("Keep editing")).on_press(Message::KeepEditing),
+                ]
+                .spacing(12),
+            ]
+            .spacing(10);
+            return column![top, confirm].spacing(16).into();
+        }
+
+        // Password prompt: shown when the user hits Send, and kept up (showing a
+        // disabled "Sending…") while the send is in flight. Inline (iced has no
+        // modal); the password is used once and never stored.
+        if self.asking_send_password || self.sending {
             let prompt = column![
                 text("Enter your mail password to send.").size(15),
                 text("It is used once for this send and never stored.").size(12),
@@ -890,7 +1006,9 @@ impl App {
                         (!self.smtp_password.is_empty() && !self.sending)
                             .then_some(Message::ConfirmSend),
                     ),
-                    button(text("Cancel")).on_press(Message::CancelSend),
+                    // Cancel is unavailable mid-send (the request can't be recalled).
+                    button(text("Cancel"))
+                        .on_press_maybe((!self.sending).then_some(Message::CancelSend)),
                 ]
                 .spacing(12),
             ]
