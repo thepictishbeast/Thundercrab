@@ -211,6 +211,9 @@ struct App {
     body: Option<markdown::Content>,
     body_note: String,
     loading_body: bool,
+    /// True only after a body loads successfully — gates Reply/Forward so they
+    /// never quote an empty body after a failed/absent fetch.
+    body_loaded: bool,
     /// Attachments of the open message (decoded bytes in memory), listed with
     /// a Save action each. Cleared when leaving the read view.
     reading_attachments: Vec<Attachment>,
@@ -479,6 +482,12 @@ impl App {
                     self.reading_from = r.from.clone();
                     self.reading_subject = r.subject.clone();
                     self.reading_headers = r.headers.clone();
+                } else {
+                    // Row not found (list desync) — clear identity so a later
+                    // Reply/Forward can't mis-attribute to a stale message.
+                    self.reading_from.clear();
+                    self.reading_subject.clear();
+                    self.reading_headers.clear();
                 }
                 self.reading_uid = uid;
                 self.reading_body_plain.clear();
@@ -487,6 +496,7 @@ impl App {
                 self.reading_attachments.clear();
                 self.show_move_picker = false;
                 self.loading_body = true;
+                self.body_loaded = false;
                 self.screen = Screen::Reading;
                 let folder = self.folder.clone();
                 Task::perform(load_body(session, folder, uid), Message::BodyLoaded)
@@ -504,6 +514,7 @@ impl App {
                 self.body_note = notes.join(" · ");
                 self.reading_body_plain = loaded.markdown;
                 self.reading_attachments = loaded.attachments;
+                self.body_loaded = true;
                 Task::none()
             }
             Message::BodyLoaded(Err(e)) => {
@@ -666,8 +677,8 @@ impl App {
 
             // --- Reply / Forward ---
             Message::Reply => {
-                // Need the body loaded to quote it.
-                if self.loading_body {
+                // Need a successfully-loaded body to quote it.
+                if !self.body_loaded {
                     return Task::none();
                 }
                 let message_id = reply::header_value(&self.reading_headers, "message-id");
@@ -689,7 +700,7 @@ impl App {
                 Task::none()
             }
             Message::Forward => {
-                if self.loading_body {
+                if !self.body_loaded {
                     return Task::none();
                 }
                 let subject = reply::forward_subject(&self.reading_subject);
@@ -827,6 +838,8 @@ impl App {
                 self.to.clear();
                 self.cc.clear();
                 self.subject.clear();
+                self.compose_in_reply_to = None;
+                self.compose_references = None;
                 self.screen = if self.folder.is_empty() { Screen::Folders } else { Screen::Messages };
                 Task::none()
             }
@@ -984,9 +997,10 @@ impl App {
         ]
         .spacing(2);
 
-        // Reply / Forward need the loaded body to quote/carry it, so they stay
-        // disabled until the fetch completes.
-        let ready = !self.loading_body;
+        // Reply / Forward need a successfully-loaded body to quote/carry it, so
+        // they stay disabled until the fetch succeeds (not merely "not loading",
+        // which would also be true after a load failure).
+        let ready = self.body_loaded;
         let compose_actions = row![
             button(text("Reply").size(13))
                 .on_press_maybe(ready.then_some(Message::Reply)),
