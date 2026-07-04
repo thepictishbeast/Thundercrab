@@ -20,12 +20,13 @@
 //! synthesizes a faithful text rendering. No HTML engine, no network, no WebView
 //! — consistent with the no-WebView pick while still showing formatted mail.
 //!
-//! ## What this does today
+//! ## Session model
 //!
-//! Connect → list folders → open a folder → list recent message headers → open
-//! a message and read its (formatted) body, with a note when a richer HTML part
-//! or attachments exist. Each action reconnects, runs, and logs out (the app
-//! holds no long-lived IMAP session yet); credentials stay in memory only.
+//! One authenticated IMAP session is opened on Connect and held in state as an
+//! `Arc<RustImapBackend>` for the app's lifetime — folder/message/read actions
+//! reuse it (no per-action reconnect). The backend serializes operations on its
+//! single socket via an internal async `Mutex`; each async task clones the `Arc`
+//! before it runs. Credentials stay in memory only and are never written to disk.
 //!
 //! Command to run:
 //!
@@ -37,10 +38,12 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::too_many_lines)]
 
+use std::sync::{Arc, LazyLock};
+
 use iced::widget::{
     Column, button, column, container, markdown, row, scrollable, text, text_input,
 };
-use iced::{Element, Length, Task, Theme};
+use iced::{Color, Element, Length, Task, Theme, theme::Palette};
 use thundercrab_imap::{
     AccountConfig, Backend, FolderSummary, rust_imap::RustImapBackend,
 };
@@ -59,18 +62,44 @@ pub fn main() -> iced::Result {
         .compact()
         .init();
 
-    iced::application(App::default, App::update, App::view)
+    iced::application(App::boot, App::update, App::view)
         .title("ThunderCrab")
         .theme(theme)
         .run()
 }
 
-/// Fixed light theme. A named fn (not a closure) so the `&App` lifetime is
+/// AMOLED true-black dark theme (default). Built once. `background = #000000`
+/// so OLED panels draw the canvas with zero lit pixels; `text` is a soft
+/// off-white for contrast without glare. The accent palette matches the
+/// ThunderCrab brand blurple. iced's [`Palette`] has exactly six colour slots.
+static AMOLED: LazyLock<Theme> = LazyLock::new(|| {
+    Theme::custom(
+        "AMOLED".to_string(),
+        Palette {
+            background: Color::BLACK,
+            text: Color::from_rgb8(0xE6, 0xE6, 0xE6),
+            primary: Color::from_rgb8(0x58, 0x65, 0xF2),
+            success: Color::from_rgb8(0x3B, 0xA5, 0x5D),
+            warning: Color::from_rgb8(0xFA, 0xA6, 0x1A),
+            danger: Color::from_rgb8(0xED, 0x42, 0x45),
+        },
+    )
+});
+
+/// The active theme as a value. AMOLED when dark (the default), else iced's
+/// built-in Light. Returned by value so callers can lend a short-lived `&Theme`
+/// to widgets like `markdown::view` (which copies what it needs and does not
+/// retain the borrow).
+fn active_theme(dark: bool) -> Theme {
+    if dark { AMOLED.clone() } else { Theme::Light }
+}
+
+/// Application theme hook. A named fn (not a closure) so the `&App` lifetime is
 /// universally quantified — a closure here infers one specific lifetime and
 /// trips iced's `for<'a>` theme bound ("implementation of `Fn` is not general
 /// enough").
-fn theme(_state: &App) -> Theme {
-    Theme::Light
+fn theme(state: &App) -> Theme {
+    active_theme(state.dark)
 }
 
 /// Which screen is on top. Connect → Folders → Messages → Reading.
@@ -104,16 +133,29 @@ struct LoadedBody {
 /// App state. Single struct; transitions are pure functions of
 /// (state, message) → (state, command). Credentials stay in memory only and
 /// are never written to disk.
+// A reader/compose UI legitimately tracks several independent async-in-flight
+// and mode flags (connecting, loading, searching, sending, theme). Modelling
+// each as a two-variant enum would add noise, not clarity.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 struct App {
-    // Connection form (host/user/password are retained after connect so each
-    // action can reconnect — the app holds no long-lived IMAP session yet).
+    // Connection form. host/user/password are retained after connect only so a
+    // reconnect (e.g. after Logout) can be attempted; the live session below is
+    // what actual operations use.
     host: String,
     user: String,
     password: String,
     status: String,
     connecting: bool,
     connected: bool,
+
+    /// The one long-lived authenticated IMAP session, shared by every action.
+    /// `None` until Connect succeeds and after Logout. Never placed in a
+    /// `Message` except as the freshly-opened handle from `open_session`.
+    session: Option<Arc<RustImapBackend>>,
+
+    /// Theme flag. `true` = AMOLED dark (default), `false` = Light.
+    dark: bool,
 
     screen: Screen,
 
@@ -133,22 +175,36 @@ struct App {
     loading_body: bool,
 }
 
+// `OpenFolder`/`OpenMessage` share an "Open" prefix by intent — they are the
+// two navigation-drill actions and read best paired.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 enum Message {
     HostChanged(String),
     UserChanged(String),
     PasswordChanged(String),
     Connect,
-    Connected(Result<Vec<FolderSummary>, String>),
+    /// The opened session plus its initial folder list, or a failure string.
+    /// `Arc<RustImapBackend>` is `Clone` (Arc) and `Debug` (the backend derives
+    /// it), so it rides in a `Message` with no wrapper needed.
+    Connected(Result<(Arc<RustImapBackend>, Vec<FolderSummary>), String>),
     OpenFolder(String),
     MessagesLoaded(Result<Vec<Row>, String>),
     OpenMessage(u32),
     BodyLoaded(Result<LoadedBody, String>),
     Back,
+    ToggleTheme,
+    Logout,
     LinkClicked(markdown::Uri),
 }
 
 impl App {
+    /// Boot state: everything default except the theme, which starts dark
+    /// (AMOLED) per the house dark-first preference.
+    fn boot() -> Self {
+        Self { dark: true, ..Self::default() }
+    }
+
     fn account(&self) -> AccountConfig {
         AccountConfig::plausiden(self.host.clone(), self.user.clone())
     }
@@ -174,11 +230,12 @@ impl App {
                 self.connecting = true;
                 self.status = "Connecting…".into();
                 let (cfg, pw) = (self.account(), self.password.clone());
-                Task::perform(connect_and_list(cfg, pw), Message::Connected)
+                Task::perform(open_session(cfg, pw), Message::Connected)
             }
-            Message::Connected(Ok(folders)) => {
+            Message::Connected(Ok((session, folders))) => {
                 self.connecting = false;
                 self.connected = true;
+                self.session = Some(session);
                 self.folders = folders;
                 self.status = format!("Connected. {} folders.", self.folders.len());
                 self.screen = Screen::Folders;
@@ -186,17 +243,21 @@ impl App {
             }
             Message::Connected(Err(e)) => {
                 self.connecting = false;
+                self.session = None;
                 self.folders.clear();
                 self.status = format!("Failed: {e}");
                 Task::none()
             }
             Message::OpenFolder(name) => {
-                self.folder = name.clone();
+                let Some(session) = self.session.clone() else {
+                    self.status = "Not connected.".into();
+                    return Task::none();
+                };
+                self.folder.clone_from(&name);
                 self.messages.clear();
                 self.loading_messages = true;
                 self.screen = Screen::Messages;
-                let (cfg, pw) = (self.account(), self.password.clone());
-                Task::perform(list_messages(cfg, pw, name), Message::MessagesLoaded)
+                Task::perform(list_messages(session, name), Message::MessagesLoaded)
             }
             Message::MessagesLoaded(Ok(rows)) => {
                 self.loading_messages = false;
@@ -209,6 +270,10 @@ impl App {
                 Task::none()
             }
             Message::OpenMessage(uid) => {
+                let Some(session) = self.session.clone() else {
+                    self.status = "Not connected.".into();
+                    return Task::none();
+                };
                 if let Some(r) = self.messages.iter().find(|r| r.uid == uid) {
                     self.reading_from = r.from.clone();
                     self.reading_subject = r.subject.clone();
@@ -217,8 +282,8 @@ impl App {
                 self.body_note.clear();
                 self.loading_body = true;
                 self.screen = Screen::Reading;
-                let (cfg, pw, folder) = (self.account(), self.password.clone(), self.folder.clone());
-                Task::perform(load_body(cfg, pw, folder, uid), Message::BodyLoaded)
+                let folder = self.folder.clone();
+                Task::perform(load_body(session, folder, uid), Message::BodyLoaded)
             }
             Message::BodyLoaded(Ok(loaded)) => {
                 self.loading_body = false;
@@ -245,6 +310,26 @@ impl App {
                 };
                 Task::none()
             }
+            Message::ToggleTheme => {
+                self.dark = !self.dark;
+                Task::none()
+            }
+            Message::Logout => {
+                // Drop the session handle: the last `Arc` owner closing the TLS
+                // stream tears down the connection. A clean IMAP `LOGOUT` would
+                // need owning the backend (`logout(self)`), which we can't while
+                // it may be shared with an in-flight task — dropping is the
+                // correct, race-free teardown here.
+                self.session = None;
+                self.connected = false;
+                self.folders.clear();
+                self.messages.clear();
+                self.body = None;
+                self.body_note.clear();
+                self.status = "Signed out.".into();
+                self.screen = Screen::Connect;
+                Task::none()
+            }
             Message::LinkClicked(url) => {
                 // Privacy: never auto-open. Surface the destination instead.
                 self.body_note = format!("Link (not opened): {url}");
@@ -268,11 +353,16 @@ impl App {
     }
 
     fn connect_view(&self) -> Element<'_, Message> {
-        let header = column![
-            text("ThunderCrab").size(32),
-            text("Local-first mail client. Rules transparent. No cloud.").size(14),
+        let header = row![
+            column![
+                text("ThunderCrab").size(32),
+                text("Local-first mail client. Rules transparent. No cloud.").size(14),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            self.theme_toggle(),
         ]
-        .spacing(4);
+        .spacing(12);
 
         let form = column![
             field("IMAP host", "mail.example.com", &self.host, Message::HostChanged),
@@ -301,7 +391,12 @@ impl App {
             );
         }
         column![
-            text("Folders").size(24),
+            row![
+                text("Folders").size(24).width(Length::Fill),
+                button(text("Sign out")).on_press(Message::Logout),
+                self.theme_toggle(),
+            ]
+            .spacing(12),
             text(&self.status).size(13),
             scrollable(list).height(Length::Fill),
         ]
@@ -312,7 +407,8 @@ impl App {
     fn messages_view(&self) -> Element<'_, Message> {
         let top = row![
             button(text("← Folders")).on_press(Message::Back),
-            text(prettify(&self.folder)).size(22),
+            text(prettify(&self.folder)).size(22).width(Length::Fill),
+            self.theme_toggle(),
         ]
         .spacing(12);
 
@@ -341,7 +437,12 @@ impl App {
     }
 
     fn reading_view(&self) -> Element<'_, Message> {
-        let top = row![button(text("← Back")).on_press(Message::Back)].spacing(12);
+        let top = row![
+            button(text("← Back")).on_press(Message::Back),
+            container(text("")).width(Length::Fill),
+            self.theme_toggle(),
+        ]
+        .spacing(12);
 
         let head = column![
             text(non_blank(&self.reading_subject, "(no subject)")).size(22),
@@ -352,7 +453,8 @@ impl App {
         let body: Element<'_, Message> = if self.loading_body {
             text("Loading message…").into()
         } else if let Some(content) = &self.body {
-            markdown::view(content.items(), &Theme::Light).map(Message::LinkClicked)
+            let th = active_theme(self.dark);
+            markdown::view(content.items(), &th).map(Message::LinkClicked)
         } else {
             text("(no body)").into()
         };
@@ -363,6 +465,12 @@ impl App {
         }
         col = col.push(scrollable(body).height(Length::Fill));
         col.spacing(10).into()
+    }
+
+    /// A compact theme-toggle button, shown in every screen's top bar.
+    fn theme_toggle(&self) -> Element<'_, Message> {
+        let label = if self.dark { "☀ Light" } else { "☾ Dark" };
+        button(text(label).size(13)).on_press(Message::ToggleTheme).into()
     }
 }
 
@@ -404,13 +512,15 @@ fn non_blank<'a>(s: &'a str, fallback: &'a str) -> &'a str {
     if s.trim().is_empty() { fallback } else { s }
 }
 
-/// Async: connect, list folders. Error type is String because BackendError
-/// isn't Clone (transport variants own non-clonable inner errors) and Iced's
-/// Task::perform requires a Clone payload.
-async fn connect_and_list(
+/// Async: open one authenticated session and list its folders. The returned
+/// `Arc<RustImapBackend>` becomes the app's long-lived session. Error type is
+/// `String` because `BackendError` isn't `Clone` (transport variants own
+/// non-clonable inner errors) and Iced's `Task::perform` requires a `Clone`
+/// payload.
+async fn open_session(
     cfg: AccountConfig,
     password: String,
-) -> Result<Vec<FolderSummary>, String> {
+) -> Result<(Arc<RustImapBackend>, Vec<FolderSummary>), String> {
     let backend = RustImapBackend::connect(&cfg, &password)
         .await
         .map_err(|e| format!("connect: {e}"))?;
@@ -418,47 +528,37 @@ async fn connect_and_list(
         .list_folders()
         .await
         .map_err(|e| format!("list_folders: {e}"))?;
-    backend.logout().await;
-    Ok(folders)
+    Ok((Arc::new(backend), folders))
 }
 
-/// Async: connect, fetch the most recent headers in `folder`, log out.
+/// Async: fetch the most recent headers in `folder` on the shared session.
 async fn list_messages(
-    cfg: AccountConfig,
-    password: String,
+    session: Arc<RustImapBackend>,
     folder: String,
 ) -> Result<Vec<Row>, String> {
-    let backend = RustImapBackend::connect(&cfg, &password)
-        .await
-        .map_err(|e| format!("connect: {e}"))?;
-    let headers = backend
+    let headers = session
         .fetch_headers(&folder, Some(50))
         .await
         .map_err(|e| format!("fetch_headers: {e}"))?;
-    backend.logout().await;
     Ok(headers
         .into_iter()
         .map(|h| Row { uid: h.uid, from: h.from, subject: h.subject })
         .collect())
 }
 
-/// Async: connect, fetch one body, log out. Prefers the plain-text part as the
-/// markdown source (faithful for ThunderCrab-composed mail and for mail-parser's
-/// HTML→text rendering); reports whether a richer HTML part / attachments exist.
+/// Async: fetch one body on the shared session. Prefers the plain-text part as
+/// the markdown source (faithful for ThunderCrab-composed mail and for
+/// mail-parser's HTML→text rendering); reports whether a richer HTML part /
+/// attachments exist. `BODY.PEEK` — reading never sets `\Seen`.
 async fn load_body(
-    cfg: AccountConfig,
-    password: String,
+    session: Arc<RustImapBackend>,
     folder: String,
     uid: u32,
 ) -> Result<LoadedBody, String> {
-    let backend = RustImapBackend::connect(&cfg, &password)
-        .await
-        .map_err(|e| format!("connect: {e}"))?;
-    let body = backend
+    let body = session
         .fetch_body(&folder, uid)
         .await
         .map_err(|e| format!("fetch_body: {e}"))?;
-    backend.logout().await;
     let markdown = body
         .plain
         .filter(|s| !s.trim().is_empty())
