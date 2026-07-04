@@ -2,7 +2,8 @@
 //!
 //! A pure-Rust Iced app over the shared IMAP core. Boots into a connection
 //! screen, then navigates folders → message list → a read view that renders
-//! the message body with real formatting.
+//! the message body with real formatting, searches a folder, saves attachments,
+//! and performs message actions (flag / mark read / move / delete-to-Trash).
 //!
 //! ## Why Iced
 //!
@@ -23,10 +24,15 @@
 //! ## Session model
 //!
 //! One authenticated IMAP session is opened on Connect and held in state as an
-//! `Arc<RustImapBackend>` for the app's lifetime — folder/message/read actions
-//! reuse it (no per-action reconnect). The backend serializes operations on its
-//! single socket via an internal async `Mutex`; each async task clones the `Arc`
-//! before it runs. Credentials stay in memory only and are never written to disk.
+//! `Arc<RustImapBackend>` for the app's lifetime — every action reuses it (no
+//! per-action reconnect). The backend serializes operations on its single socket
+//! via an internal async `Mutex`; each async task clones the `Arc` before it
+//! runs. Credentials stay in memory only and are never written to disk.
+//!
+//! ## Reading never mutates
+//!
+//! Opening a message uses `BODY.PEEK` and search uses `EXAMINE` — neither sets
+//! `\Seen`. Read-state changes are explicit user actions (Mark read / unread).
 //!
 //! Command to run:
 //!
@@ -45,7 +51,8 @@ use iced::widget::{
 };
 use iced::{Color, Element, Length, Task, Theme, theme::Palette};
 use thundercrab_imap::{
-    AccountConfig, Backend, FolderSummary, rust_imap::RustImapBackend,
+    AccountConfig, Backend, FolderSummary, body::Attachment,
+    rust_imap::{RustImapBackend, text_search_criterion},
 };
 
 /// Entry point.
@@ -122,12 +129,14 @@ struct Row {
 
 /// A loaded body, ready to display. The markdown source is carried as a String
 /// (Iced messages must be `Send`); `App` parses it into `markdown::Content` —
-/// which is not `Send` — on the main thread in `update`.
+/// which is not `Send` — on the main thread in `update`. Attachments (already
+/// decoded to bytes by the core `fetch_body`) travel along so Save writes them
+/// straight from memory with no second round-trip.
 #[derive(Debug, Clone)]
 struct LoadedBody {
     markdown: String,
     has_html: bool,
-    attachments: usize,
+    attachments: Vec<Attachment>,
 }
 
 /// App state. Single struct; transitions are pure functions of
@@ -150,8 +159,7 @@ struct App {
     connected: bool,
 
     /// The one long-lived authenticated IMAP session, shared by every action.
-    /// `None` until Connect succeeds and after Logout. Never placed in a
-    /// `Message` except as the freshly-opened handle from `open_session`.
+    /// `None` until Connect succeeds and after Logout.
     session: Option<Arc<RustImapBackend>>,
 
     /// Theme flag. `true` = AMOLED dark (default), `false` = Light.
@@ -167,12 +175,33 @@ struct App {
     messages: Vec<Row>,
     loading_messages: bool,
 
+    // Search within the open folder.
+    search_query: String,
+    searching: bool,
+    /// True when the list currently shows search results (vs. the folder's
+    /// recent headers) — drives the results label and empty-state copy.
+    is_search_result: bool,
+
     // Read view.
+    reading_uid: u32,
     reading_from: String,
     reading_subject: String,
     body: Option<markdown::Content>,
     body_note: String,
     loading_body: bool,
+    /// Attachments of the open message (decoded bytes in memory), listed with
+    /// a Save action each. Cleared when leaving the read view.
+    reading_attachments: Vec<Attachment>,
+    /// Whether the move-to-folder picker is expanded in the read view.
+    show_move_picker: bool,
+}
+
+#[derive(Debug, Clone)]
+enum Action {
+    /// Set or clear an IMAP flag (`\\Seen`, `\\Flagged`) on the open message.
+    Flag(&'static str, bool),
+    /// Move the open message to another folder.
+    Move(String),
 }
 
 // `OpenFolder`/`OpenMessage` share an "Open" prefix by intent — they are the
@@ -196,6 +225,26 @@ enum Message {
     ToggleTheme,
     Logout,
     LinkClicked(markdown::Uri),
+
+    // --- Search ---
+    SearchChanged(String),
+    SubmitSearch,
+    ClearSearch,
+    SearchLoaded(Result<Vec<Row>, String>),
+
+    // --- Attachments ---
+    SaveAttachment(usize),
+    AttachmentSaved(Result<String, String>),
+
+    // --- Message actions ---
+    /// Run an action on the currently-open message.
+    DoAction(Action),
+    /// Toggle the move-to-folder picker in the read view.
+    ShowMovePicker(bool),
+    /// Move the open message to the Trash special-use folder.
+    DeleteCurrent,
+    /// An action finished: `Ok(status)` triggers a folder refresh.
+    ActionDone(Result<String, String>),
 }
 
 impl App {
@@ -207,6 +256,27 @@ impl App {
 
     fn account(&self) -> AccountConfig {
         AccountConfig::plausiden(self.host.clone(), self.user.clone())
+    }
+
+    /// The server's Trash mailbox, by `\Trash` special-use if marked, else by a
+    /// case-insensitive name match. `None` if the account has no Trash folder.
+    fn trash_folder(&self) -> Option<String> {
+        self.folders
+            .iter()
+            .find(|f| f.special_use.as_deref() == Some("\\Trash"))
+            .or_else(|| self.folders.iter().find(|f| f.name.eq_ignore_ascii_case("Trash")))
+            .map(|f| f.name.clone())
+    }
+
+    /// Reload the open folder's recent headers on the shared session (used after
+    /// an action that changed the folder's contents). No-op without a session.
+    fn reload_folder(&mut self) -> Task<Message> {
+        let Some(session) = self.session.clone() else {
+            return Task::none();
+        };
+        self.is_search_result = false;
+        self.loading_messages = true;
+        Task::perform(list_messages(session, self.folder.clone()), Message::MessagesLoaded)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -255,6 +325,8 @@ impl App {
                 };
                 self.folder.clone_from(&name);
                 self.messages.clear();
+                self.search_query.clear();
+                self.is_search_result = false;
                 self.loading_messages = true;
                 self.screen = Screen::Messages;
                 Task::perform(list_messages(session, name), Message::MessagesLoaded)
@@ -278,8 +350,11 @@ impl App {
                     self.reading_from = r.from.clone();
                     self.reading_subject = r.subject.clone();
                 }
+                self.reading_uid = uid;
                 self.body = None;
                 self.body_note.clear();
+                self.reading_attachments.clear();
+                self.show_move_picker = false;
                 self.loading_body = true;
                 self.screen = Screen::Reading;
                 let folder = self.folder.clone();
@@ -292,10 +367,11 @@ impl App {
                 if loaded.has_html {
                     notes.push("a richer HTML part exists".to_string());
                 }
-                if loaded.attachments > 0 {
-                    notes.push(format!("{} attachment(s)", loaded.attachments));
+                if !loaded.attachments.is_empty() {
+                    notes.push(format!("{} attachment(s)", loaded.attachments.len()));
                 }
                 self.body_note = notes.join(" · ");
+                self.reading_attachments = loaded.attachments;
                 Task::none()
             }
             Message::BodyLoaded(Err(e)) => {
@@ -326,6 +402,7 @@ impl App {
                 self.messages.clear();
                 self.body = None;
                 self.body_note.clear();
+                self.reading_attachments.clear();
                 self.status = "Signed out.".into();
                 self.screen = Screen::Connect;
                 Task::none()
@@ -333,6 +410,102 @@ impl App {
             Message::LinkClicked(url) => {
                 // Privacy: never auto-open. Surface the destination instead.
                 self.body_note = format!("Link (not opened): {url}");
+                Task::none()
+            }
+
+            // --- Search ---
+            Message::SearchChanged(q) => {
+                self.search_query = q;
+                Task::none()
+            }
+            Message::SubmitSearch => {
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                let term = self.search_query.trim().to_string();
+                if term.is_empty() {
+                    // Empty query restores the folder's recent headers.
+                    return self.reload_folder();
+                }
+                self.searching = true;
+                Task::perform(
+                    search_messages(session, self.folder.clone(), term),
+                    Message::SearchLoaded,
+                )
+            }
+            Message::ClearSearch => {
+                self.search_query.clear();
+                self.reload_folder()
+            }
+            Message::SearchLoaded(Ok(rows)) => {
+                self.searching = false;
+                self.is_search_result = true;
+                self.messages = rows;
+                Task::none()
+            }
+            Message::SearchLoaded(Err(e)) => {
+                self.searching = false;
+                self.status = format!("Search failed: {e}");
+                Task::none()
+            }
+
+            // --- Attachments ---
+            Message::SaveAttachment(index) => {
+                let Some(att) = self.reading_attachments.get(index) else {
+                    return Task::none();
+                };
+                let name = if att.filename.is_empty() {
+                    format!("attachment-{index}")
+                } else {
+                    att.filename.clone()
+                };
+                let bytes = att.bytes.clone();
+                Task::perform(save_attachment(name, bytes), Message::AttachmentSaved)
+            }
+            Message::AttachmentSaved(Ok(note)) => {
+                self.body_note = note;
+                Task::none()
+            }
+            Message::AttachmentSaved(Err(e)) => {
+                self.body_note = format!("Save failed: {e}");
+                Task::none()
+            }
+
+            // --- Message actions ---
+            Message::ShowMovePicker(show) => {
+                self.show_move_picker = show;
+                Task::none()
+            }
+            Message::DoAction(action) => {
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                self.show_move_picker = false;
+                let (folder, uid) = (self.folder.clone(), self.reading_uid);
+                Task::perform(run_action(session, folder, uid, action), Message::ActionDone)
+            }
+            Message::DeleteCurrent => {
+                let Some(session) = self.session.clone() else {
+                    return Task::none();
+                };
+                let Some(trash) = self.trash_folder() else {
+                    self.body_note = "No Trash folder found for this account.".into();
+                    return Task::none();
+                };
+                let (folder, uid) = (self.folder.clone(), self.reading_uid);
+                Task::perform(
+                    run_action(session, folder, uid, Action::Move(trash)),
+                    Message::ActionDone,
+                )
+            }
+            Message::ActionDone(Ok(note)) => {
+                // Action changed the folder; return to the list and refresh it.
+                self.status = note;
+                self.screen = Screen::Messages;
+                self.reload_folder()
+            }
+            Message::ActionDone(Err(e)) => {
+                self.body_note = format!("Action failed: {e}");
                 Task::none()
             }
         }
@@ -412,10 +585,29 @@ impl App {
         ]
         .spacing(12);
 
-        let inner: Element<'_, Message> = if self.loading_messages {
-            text("Loading messages…").into()
+        // Search bar: type a term and press Enter. Escaping happens in the core
+        // (`text_search_criterion`); we pass the raw term only.
+        let mut search_bar = row![
+            text_input("Search this folder…", &self.search_query)
+                .on_input(Message::SearchChanged)
+                .on_submit(Message::SubmitSearch)
+                .padding(8),
+        ]
+        .spacing(8);
+        if self.is_search_result || !self.search_query.is_empty() {
+            search_bar = search_bar.push(button(text("Clear")).on_press(Message::ClearSearch));
+        }
+
+        let count_note: Element<'_, Message> = if self.is_search_result && !self.searching {
+            text(format!("{} result(s)", self.messages.len())).size(12).into()
+        } else {
+            container(text("")).into()
+        };
+
+        let inner: Element<'_, Message> = if self.loading_messages || self.searching {
+            text(if self.searching { "Searching…" } else { "Loading messages…" }).into()
         } else if self.messages.is_empty() {
-            text("(no messages)").into()
+            text(if self.is_search_result { "No matches." } else { "(no messages)" }).into()
         } else {
             let mut list = Column::new().spacing(2);
             for m in &self.messages {
@@ -433,7 +625,7 @@ impl App {
             scrollable(list).height(Length::Fill).into()
         };
 
-        column![top, inner].spacing(12).into()
+        column![top, search_bar, count_note, inner].spacing(12).into()
     }
 
     fn reading_view(&self) -> Element<'_, Message> {
@@ -450,6 +642,63 @@ impl App {
         ]
         .spacing(2);
 
+        // Action bar. Reading itself never changed \Seen (BODY.PEEK), so read
+        // state is an explicit choice here.
+        let actions = row![
+            button(text("Mark read").size(13))
+                .on_press(Message::DoAction(Action::Flag("\\Seen", true))),
+            button(text("Mark unread").size(13))
+                .on_press(Message::DoAction(Action::Flag("\\Seen", false))),
+            button(text("★ Flag").size(13))
+                .on_press(Message::DoAction(Action::Flag("\\Flagged", true))),
+            button(text("Move…").size(13))
+                .on_press(Message::ShowMovePicker(!self.show_move_picker)),
+            button(text("Delete").size(13)).on_press(Message::DeleteCurrent),
+        ]
+        .spacing(8);
+
+        let mut col = column![top, head, actions].spacing(10);
+
+        // Move picker: choose a destination folder (excludes the current one).
+        if self.show_move_picker {
+            let mut picker = Column::new().spacing(2);
+            for f in &self.folders {
+                if f.name == self.folder {
+                    continue;
+                }
+                picker = picker.push(
+                    button(text(f.name.clone()).size(13))
+                        .width(Length::Fill)
+                        .on_press(Message::DoAction(Action::Move(f.name.clone()))),
+                );
+            }
+            col = col.push(
+                column![text("Move to:").size(13), scrollable(picker).height(Length::Fixed(160.0))]
+                    .spacing(4),
+            );
+        }
+
+        if !self.body_note.is_empty() {
+            col = col.push(text(&self.body_note).size(12));
+        }
+
+        // Attachment list with a Save action each.
+        if !self.reading_attachments.is_empty() {
+            let mut atts = Column::new().spacing(4);
+            for (i, a) in self.reading_attachments.iter().enumerate() {
+                let name = if a.filename.is_empty() { "(unnamed)" } else { a.filename.as_str() };
+                let label = format!("{name} · {} · {}", a.mime_type, human_size(a.size()));
+                atts = atts.push(
+                    row![
+                        text(label).size(13).width(Length::Fill),
+                        button(text("Save").size(13)).on_press(Message::SaveAttachment(i)),
+                    ]
+                    .spacing(8),
+                );
+            }
+            col = col.push(atts);
+        }
+
         let body: Element<'_, Message> = if self.loading_body {
             text("Loading message…").into()
         } else if let Some(content) = &self.body {
@@ -459,10 +708,6 @@ impl App {
             text("(no body)").into()
         };
 
-        let mut col = column![top, head].spacing(10);
-        if !self.body_note.is_empty() {
-            col = col.push(text(&self.body_note).size(12));
-        }
         col = col.push(scrollable(body).height(Length::Fill));
         col.spacing(10).into()
     }
@@ -512,6 +757,21 @@ fn non_blank<'a>(s: &'a str, fallback: &'a str) -> &'a str {
     if s.trim().is_empty() { fallback } else { s }
 }
 
+/// Human-readable byte size (B / KB / MB) for the attachment list.
+fn human_size(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    #[allow(clippy::cast_precision_loss)]
+    let b = bytes as f64;
+    if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Async: open one authenticated session and list its folders. The returned
 /// `Arc<RustImapBackend>` becomes the app's long-lived session. Error type is
 /// `String` because `BackendError` isn't `Clone` (transport variants own
@@ -546,10 +806,31 @@ async fn list_messages(
         .collect())
 }
 
+/// Async: search `folder` for `term` on the shared session. The raw term is
+/// turned into a safe IMAP `TEXT "…"` criterion by the core
+/// `text_search_criterion` (escaping stays in Rust; the UI never builds IMAP
+/// syntax). `EXAMINE` — never marks `\Seen`.
+async fn search_messages(
+    session: Arc<RustImapBackend>,
+    folder: String,
+    term: String,
+) -> Result<Vec<Row>, String> {
+    let criterion = text_search_criterion(&term);
+    let headers = session
+        .search(&folder, &criterion)
+        .await
+        .map_err(|e| format!("search: {e}"))?;
+    Ok(headers
+        .into_iter()
+        .map(|h| Row { uid: h.uid, from: h.from, subject: h.subject })
+        .collect())
+}
+
 /// Async: fetch one body on the shared session. Prefers the plain-text part as
 /// the markdown source (faithful for ThunderCrab-composed mail and for
-/// mail-parser's HTML→text rendering); reports whether a richer HTML part /
-/// attachments exist. `BODY.PEEK` — reading never sets `\Seen`.
+/// mail-parser's HTML→text rendering); reports whether a richer HTML part
+/// exists and carries any decoded attachments. `BODY.PEEK` — reading never sets
+/// `\Seen`.
 async fn load_body(
     session: Arc<RustImapBackend>,
     folder: String,
@@ -566,6 +847,54 @@ async fn load_body(
     Ok(LoadedBody {
         markdown,
         has_html: body.html_sanitized.is_some(),
-        attachments: body.attachments.len(),
+        attachments: body.attachments,
     })
+}
+
+/// Async: prompt for a destination via a native file dialog, then write the
+/// attachment bytes there. Returns a human status; a cancelled dialog is a
+/// benign non-error. The bytes are already in memory (from `fetch_body`), so no
+/// network round-trip happens here.
+async fn save_attachment(filename: String, bytes: Vec<u8>) -> Result<String, String> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_file_name(&filename)
+        .save_file()
+        .await;
+    let Some(handle) = handle else {
+        return Ok("Save cancelled.".to_string());
+    };
+    let path = handle.path().to_path_buf();
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(format!("Saved to {}", path.display()))
+}
+
+/// Async: run a message [`Action`] on the shared session and report a status.
+async fn run_action(
+    session: Arc<RustImapBackend>,
+    folder: String,
+    uid: u32,
+    action: Action,
+) -> Result<String, String> {
+    match action {
+        Action::Flag(flag, set) => {
+            session
+                .set_flag(&folder, uid, flag, set)
+                .await
+                .map_err(|e| format!("set_flag: {e}"))?;
+            Ok(format!(
+                "{} {}",
+                if set { "Set" } else { "Cleared" },
+                flag.trim_start_matches('\\')
+            ))
+        }
+        Action::Move(to) => {
+            session
+                .move_message(&folder, &to, uid)
+                .await
+                .map_err(|e| format!("move_message: {e}"))?;
+            Ok(format!("Moved to {to}"))
+        }
+    }
 }

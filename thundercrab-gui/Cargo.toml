@@ -28,6 +28,11 @@ tracing-subscriber.workspace = true
 iced = { version = "0.14", default-features = false, features = [
     "tokio", "advanced", "markdown", "tiny-skia", "x11", "wayland",
 ] }
+# Native file dialogs for saving/picking attachments. `xdg-portal` uses the
+# freedesktop portal (pure-Rust ashpd/zbus) instead of GTK — keeps the no-GTK
+# posture (no system GTK headers to build). `tokio` matches iced's runtime so
+# the dialog future integrates with Task::perform.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
 [lints]
 workspace = true
